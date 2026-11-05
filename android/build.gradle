@@ -6,9 +6,6 @@
 //   * Android SDK with platform 34 and build-tools installed
 //   * a local.properties with sdk.dir=... (or ANDROID_HOME exported)
 //
-// NOTE: this configuration has not yet been verified against a real Android
-// SDK build in this environment. See docs/AndroidPort.md.
-
 plugins {
     id 'com.android.application'
 }
@@ -30,8 +27,9 @@ android {
         applicationId 'com.desertkun.brainout.android'
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        // Set by CI so every release installs over the previous one.
+        versionCode((project.findProperty('brainoutVersionCode') ?: '1') as int)
+        versionName((project.findProperty('brainoutVersionName') ?: '1.0-dev').toString())
 
         ndk {
             abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
@@ -216,10 +214,25 @@ tasks.register('bundleReflectClasses', Jar) {
     includeEmptyDirs = false
 }
 
+// Copies the client data packages into the APK assets; without them the app dies
+// on launch ("Mainmenu package is missing"). A clean clone builds them first, later
+// builds reuse bin/client/packages. Pass -PrebuildData after changing anything in data/.
+def clientPackages = rootProject.file('bin/client/packages')
+
+tasks.register('bundleDataPackages', Sync) {
+    if (project.hasProperty('rebuildData') || !new File(clientPackages, 'mainmenu.zip').exists()) {
+        dependsOn ':make_data_client'
+    }
+    from clientPackages
+    include '*.zip'
+    into file('assets/packages')
+}
+
 tasks.configureEach { task ->
     if (task.name == 'preBuild') {
         task.dependsOn 'copyAndroidNatives'
         task.dependsOn 'bundleReflectClasses'
+        task.dependsOn 'bundleDataPackages'
     }
 }
 
