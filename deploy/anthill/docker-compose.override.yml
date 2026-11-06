@@ -1,9 +1,0 @@
-# Drop this into anthill-dev/dev/ (next to docker-compose.yml) to swap the
-# game-controller for the JRE17 variant that can spawn the Java Brain/Out server.
-# Build the image first:
-#   docker build -f controller.Dockerfile -t brainout/anthill-game-controller:jre17 .
-# Then:
-#   docker compose up -d --no-build anthill_game_controller
-services:
-  anthill_game_controller:
-    image: brainout/anthill-game-controller:jre17

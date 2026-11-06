@@ -1,116 +1,132 @@
 #!/usr/bin/env bash
-# One-command bring-up of the self-hosted Brain/Out online backend.
+# Brings up (or updates) the self-hosted Brain/Out online backend on this host.
 #
-# Ties together everything that was previously hand-assembled across the session
-# and docs/OnlinePlatformLocal.md: the upstream anthill-dev stack, the brainout
-# registration, the scope/FK/market fixes, the JRE-17 controller image, the
-# game-server provisioning, the deployment staging and the economy seed.
+#   1. fill in deploy/anthill/config.env (copy config.env.example)
+#   2. ./deploy/anthill/deploy.sh
 #
-# Idempotent — safe to re-run. Works for a local box (PUBLIC_HOST=localhost) and
-# for a real server (PUBLIC_HOST=<public ip/domain>).
+# Safe to re-run: use it again to deploy a new server build or after changing
+# config.env. Step-by-step guide: docs/ServerSetup.md.
 #
-# Prereqs on the target:
-#   * docker + docker compose, git, bash, and python3 (Ubuntu has it; on the
-#     Windows dev box `python` is picked up automatically)
-#   * the server payload built:  ./gradlew server:dist make_data   (bin/server)
+# What it sets up on top of the upstream anthill-dev stack:
+#   * every container port bound to 127.0.0.1; nginx terminates HTTPS on
+#     19501-19519 with a certificate from a private CA (no domain needed)
+#   * random passwords for the Anthill root account and the game server account
+#     (kept in state/secrets.env), and player accounts without admin scopes
+#   * the real market service instead of a stub
+#   * the Brain/Out game registration, game servers and starter economy
 #
-# Usage:
-#   PUBLIC_HOST=203.0.113.10 ./deploy/anthill/deploy.sh
-#   ./deploy/anthill/deploy.sh                 # local, PUBLIC_HOST=localhost
+# Needs: docker with compose >= 2.24.4, git, curl, openssl, python3.
 set -euo pipefail
-
-# ----- config (override via env) -------------------------------------------
-HERE="$(cd "$(dirname "$0")" && pwd)"
-REPO="$(cd "$HERE/../.." && pwd)"
-
-PUBLIC_HOST="${PUBLIC_HOST:-localhost}"          # what clients connect to
-ANTHILL_REPO="${ANTHILL_REPO:-https://github.com/anthill-platform/anthill-dev.git}"
-ANTHILL_DIR="${ANTHILL_DIR:-$REPO/../anthill-dev/dev}"   # the upstream stack's dev/
-MYSQL_CONTAINER="${MYSQL_CONTAINER:-mysql}"
-MYSQL_ROOT_PW="${MYSQL_ROOT_PW:-Root123}"
-GAMESPACE_ID="${GAMESPACE_ID:-1}"
-GAME="${GAME:-brainout}"
-VERSION="${VERSION:-valpha2}"
-DEPLOYMENT_ID="${DEPLOYMENT_ID:-1}"
-CONTROLLER_IMAGE="${CONTROLLER_IMAGE:-brainout/anthill-game-controller:jre17}"
-PORTS_FROM="${PORTS_FROM:-38000}"                # narrow pool -> easy firewalling
-PORTS_TO="${PORTS_TO:-38020}"
-
-# pick an interpreter that actually runs — on Windows `python3` may be the
-# non-functional Microsoft Store alias, so verify each candidate executes
-PYTHON=""
-for _py in python3 python; do
-  if command -v "$_py" >/dev/null 2>&1 && "$_py" -c "import sys" >/dev/null 2>&1; then
-    PYTHON="$_py"; break
-  fi
-done
-export MYSQL_CONTAINER MYSQL_ROOT_PW GAMESPACE_ID GAME VERSION DEPLOYMENT_ID
-
-step() { echo; echo "==== $* ===="; }
-# run SQL, keep real errors visible, drop only the known container noise
-myq() {
-  { echo "SET NAMES utf8mb4;"; cat; } \
-    | docker exec -i "$MYSQL_CONTAINER" mysql -uroot -p"$MYSQL_ROOT_PW" "$1" 2>&1 \
-    | grep -vE "Using a password on the command line|Found option without preceding group" || true
-}
-wait_for() { # wait_for "<desc>" <cmd...>
-  local desc="$1"; shift; local n=90
-  until "$@" >/dev/null 2>&1; do
-    n=$((n-1)); [ $n -le 0 ] && { echo "timed out waiting for: $desc"; return 1; }
-    sleep 3
-  done
-}
-db_exists()    { docker exec -i "$MYSQL_CONTAINER" mysql -uroot -p"$MYSQL_ROOT_PW" -N -e \
-                 "SELECT 1 FROM information_schema.schemata WHERE schema_name='$1'" 2>/dev/null | grep -q 1; }
-table_exists() { docker exec -i "$MYSQL_CONTAINER" mysql -uroot -p"$MYSQL_ROOT_PW" -N -e \
-                 "SELECT 1 FROM information_schema.tables WHERE table_schema='$1' AND table_name='$2'" 2>/dev/null | grep -q 1; }
-
-dc() { ( cd "$ANTHILL_DIR" && docker compose "$@" ); }
+. "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 # ----- 0. prechecks ---------------------------------------------------------
 step "0. prechecks"
-command -v docker >/dev/null || { echo "docker not found"; exit 1; }
-[ -n "$PYTHON" ] || { echo "python3/python not found"; exit 1; }
-[ -f "$REPO/bin/server/brainout-server.jar" ] || { echo "missing bin/server/brainout-server.jar — run ./gradlew server:dist"; exit 1; }
-[ -d "$REPO/bin/server/packages" ] || { echo "missing bin/server/packages — run ./gradlew make_data"; exit 1; }
-echo "PUBLIC_HOST=$PUBLIC_HOST  ANTHILL_DIR=$ANTHILL_DIR  ports=$PORTS_FROM-$PORTS_TO"
+[ -n "$PUBLIC_HOST" ] || die "PUBLIC_HOST is not set: copy config.env.example to config.env and fill it in"
+for c in docker git curl openssl; do command -v "$c" >/dev/null || die "$c not found"; done
+[ -n "$PYTHON" ] || die "python3 not found"
 
-# ----- 1. upstream stack ----------------------------------------------------
-step "1. anthill-dev stack"
-if [ ! -d "$ANTHILL_DIR" ]; then
-  echo "cloning $ANTHILL_REPO"
-  git clone "$ANTHILL_REPO" "$(dirname "$ANTHILL_DIR")"
+compose_version="$(docker compose version --short 2>/dev/null | sed 's/^v//')"
+[ -n "$compose_version" ] || die "docker compose plugin not found"
+if [ "$(printf '%s\n' 2.24.4 "$compose_version" | sort -V | head -1)" != "2.24.4" ]; then
+    die "docker compose $compose_version is too old, need 2.24.4+ (install Docker from download.docker.com)"
 fi
-# CRLF in *.sh breaks keygen when the repo was cloned on Windows
-find "$ANTHILL_DIR/.." -name '*.sh' -not -path '*/.git/*' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
 
-# generated override: JRE-17 controller image + public gs_host + narrowed port pool
-cat > "$ANTHILL_DIR/docker-compose.override.yml" <<YAML
-# generated by deploy/anthill/deploy.sh — do not edit by hand
-services:
-  anthill_game_controller:
-    image: $CONTROLLER_IMAGE
-    environment:
-      gs_host: "$PUBLIC_HOST"
-      ports_pool_from: $PORTS_FROM
-      ports_pool_to: $PORTS_TO
-YAML
+SERVER_DIR="$REPO/bin/server"
+if [ -n "$SERVER_BUNDLE" ]; then
+    [ -f "$SERVER_BUNDLE" ] || die "SERVER_BUNDLE not found: $SERVER_BUNDLE"
+    rm -rf "$STATE_DIR/server-bundle"
+    mkdir -p "$STATE_DIR/server-bundle"
+    tar -xzf "$SERVER_BUNDLE" -C "$STATE_DIR/server-bundle"
+    SERVER_DIR="$STATE_DIR/server-bundle/server"
+fi
+[ -f "$SERVER_DIR/brainout-server.jar" ] || die "no brainout-server.jar in $SERVER_DIR (set SERVER_BUNDLE or run ./gradlew server:dist)"
+[ -d "$SERVER_DIR/packages" ] || die "no packages/ in $SERVER_DIR (set SERVER_BUNDLE or run ./gradlew make_data)"
+echo "host=$PUBLIC_HOST  https=$((9501 + TLS_PORT_OFFSET))-$((9519 + TLS_PORT_OFFSET))  rooms=$PORTS_FROM-$PORTS_TO  compose=$compose_version"
+echo "server build: $SERVER_DIR"
 
-step "1b. controller image ($CONTROLLER_IMAGE)"
-docker build -f "$HERE/controller.Dockerfile" -t "$CONTROLLER_IMAGE" "$HERE"
+# ----- 1. secrets and TLS ---------------------------------------------------
+step "1. secrets and TLS"
+mkdir -p "$STATE_DIR"
+chmod 700 "$STATE_DIR"
+if [ ! -f "$STATE_DIR/secrets.env" ]; then
+    ( umask 077
+      printf 'ROOT_PASSWORD=%s\nSRV_PASS=%s\n' "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" \
+          > "$STATE_DIR/secrets.env" )
+    echo "generated $STATE_DIR/secrets.env"
+fi
+set -a; . "$STATE_DIR/secrets.env"; set +a
+[ -n "${ROOT_PASSWORD:-}" ] && [ -n "${SRV_PASS:-}" ] || die "secrets.env is missing ROOT_PASSWORD or SRV_PASS"
 
-step "1c. build keygen + up"
-dc build anthill_keygen
-dc up -d
+bash "$HERE/tls.sh" "$TLS_DIR" "$PUBLIC_HOST" | grep -vE '^[.+*-]|^$' || true
+
+# ----- 2. upstream sources --------------------------------------------------
+step "2. upstream sources (pinned)"
+checkout() { # checkout <repo url> <dir> <ref>
+    if [ ! -d "$2/.git" ]; then
+        git clone -q "$1" "$2"
+    fi
+    git -C "$2" fetch -q origin
+    git -C "$2" -c advice.detachedHead=false checkout -q "$3"
+    echo "$(basename "$2") at $(git -C "$2" rev-parse --short HEAD)"
+}
+# discovery-services.json is rewritten below; discard that before switching refs
+git -C "$(dirname "$ANTHILL_DIR")" checkout -q -- . 2>/dev/null || true
+checkout "$ANTHILL_REPO" "$(dirname "$ANTHILL_DIR")" "$ANTHILL_REF"
+checkout "$MARKET_REPO" "$MARKET_DIR" "$MARKET_REF"
+# CRLF in *.sh breaks the keygen when the sources were checked out on Windows
+find "$(dirname "$ANTHILL_DIR")" -name '*.sh' -not -path '*/.git/*' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+
+# ----- 3. configuration -----------------------------------------------------
+step "3. render configuration"
+export ANTHILL_DIR STATE_DIR PUBLIC_HOST TLS_PORT_OFFSET ROOT_PASSWORD \
+       CONTROLLER_IMAGE MARKET_IMAGE NGINX_IMAGE PORTS_FROM PORTS_TO
+"$PYTHON" "$HERE/render.py"
+dc config -q
+echo "compose configuration is valid"
+
+# ----- 4. images ------------------------------------------------------------
+step "4. images"
+docker build -q -f "$HERE/controller.Dockerfile" -t "$CONTROLLER_IMAGE" "$HERE"
+docker build -q -t "$MARKET_IMAGE" "$MARKET_DIR"
+dc pull -q --ignore-buildable
+dc build -q
+
+# ----- 5. start -------------------------------------------------------------
+step "5. start the stack"
+dc up -d --no-build --remove-orphans
 wait_for "keys"  test -f "$ANTHILL_DIR/keys/public/anthill.pub"
 wait_for "mysql" bash -c "docker exec $MYSQL_CONTAINER mysqladmin -uroot -p$MYSQL_ROOT_PW ping 2>/dev/null | grep -q alive"
-wait_for "dev_login"   db_exists dev_login
-wait_for "dev_store"   table_exists dev_store stores
-wait_for "dev_game"    db_exists dev_game
-echo "stack up, seed schemas present"
+echo "CREATE DATABASE IF NOT EXISTS dev_market;" | myq mysql
+wait_for "dev_login schema" table_exists dev_login credential_passwords
+wait_for "dev_store schema" table_exists dev_store stores
+wait_for "dev_game schema"  table_exists dev_game game_servers
+echo "stack up"
 
-# ----- 2. register brainout -------------------------------------------------
-step "2. register brainout (app / version / gamespace / scopes)"
+# ----- 6. accounts and registration ----------------------------------------
+step "6. accounts, game registration, scopes"
+# Login hashes passwords as base64(HMAC-SHA256(key=credential+salt, msg=password)).
+SALT="$(sed -n 's/^ *passwords_salt: *//p' "$ANTHILL_DIR/docker-compose.yml" | head -1 | tr -d '"')"
+[ -n "$SALT" ] || die "passwords_salt not found in docker-compose.yml"
+ROOT_HASH="$(CRED="dev:root" SALT="$SALT" PW="$ROOT_PASSWORD" "$PYTHON" -c \
+    'import base64,hashlib,hmac,os;print(base64.b64encode(hmac.new((os.environ["CRED"]+os.environ["SALT"]).encode(),os.environ["PW"].encode(),hashlib.sha256).digest()).decode())')"
+
+# The root account exists with password "anthill" unless the login service was
+# first started with root_user_password; set it either way. It's reachable
+# through the public login service, so the default must never survive.
+myq dev_login <<SQL
+UPDATE credential_passwords SET password='$ROOT_HASH', algorithm='HMACSHA256'
+ WHERE credential='dev:root';
+INSERT INTO gamespace_aliases (gamespace_name, gamespace_id)
+  SELECT '$GAME:desktop', $GAMESPACE_ID FROM DUAL
+  WHERE NOT EXISTS (SELECT 1 FROM gamespace_aliases WHERE gamespace_name='$GAME:desktop');
+-- Scopes any player account gets. The client asks for more
+-- (ClientConstants.Scopes.SCOPES) but only needs SHOULD_HAVE; the admin scopes
+-- game_root/game_mod/game_editor/game_ban/static_upload stay out on purpose.
+UPDATE gamespace SET gamespace_scopes=
+ 'profile,profile_write,game,message_listen,store,group,party,party_create,report_upload,blog,market,event,exec_func_call'
+ WHERE gamespace_id=$GAMESPACE_ID;
+SQL
+
 myq dev_environment <<SQL
 INSERT INTO applications (application_name, application_title, min_api)
   SELECT '$GAME','Brain/Out','0.2' FROM DUAL
@@ -119,89 +135,59 @@ INSERT INTO application_versions (application_id, version_name, version_environm
   SELECT application_id, '$VERSION', 1 FROM applications WHERE application_name='$GAME'
   AND NOT EXISTS (SELECT 1 FROM application_versions av JOIN applications a ON av.application_id=a.application_id
                   WHERE a.application_name='$GAME' AND av.version_name='$VERSION');
-SQL
-myq dev_login <<SQL
-INSERT INTO gamespace_aliases (gamespace_name, gamespace_id)
-  SELECT '$GAME:desktop', $GAMESPACE_ID FROM DUAL
-  WHERE NOT EXISTS (SELECT 1 FROM gamespace_aliases WHERE gamespace_name='$GAME:desktop');
--- widen the gamespace scopes to cover ClientConstants.Scopes.SCOPES (else login loops)
-UPDATE gamespace SET gamespace_scopes=
- 'profile,profile_write,game,game_root,game_mod,game_editor,message_listen,store,group,static_upload,party,party_create,report_upload,blog,game_ban,market,event,exec_func_call'
- WHERE gamespace_id=$GAMESPACE_ID;
+UPDATE environments SET environment_discovery='https://$PUBLIC_HOST:$((9502 + TLS_PORT_OFFSET))'
+ WHERE environment_id=1;
 SQL
 
-# ----- 3. store FK fix ------------------------------------------------------
-step "3. store FK fix (campaigns/campaign_items/orders)"
+# ----- 7. store FK fix ------------------------------------------------------
+step "7. store tables"
 if ! table_exists dev_store orders; then
-  SIMG=anthillplatform/anthill-store:latest
-  SQLDIR=/usr/local/lib/python3.7/site-packages/anthill/store/sql
-  for f in campaigns campaign_items orders; do
-    docker run --rm --entrypoint sh "$SIMG" -c "cat $SQLDIR/$f.sql" \
-      | docker exec -i "$MYSQL_CONTAINER" mysql -uroot -p"$MYSQL_ROOT_PW" dev_store 2>/dev/null || true
-  done
-  docker restart anthill_store >/dev/null
-  echo "created missing store tables; restarted store"
+    SIMG=anthillplatform/anthill-store:latest
+    SQLDIR=/usr/local/lib/python3.7/site-packages/anthill/store/sql
+    # the store creates `orders` before `campaigns`, which its foreign key needs
+    for f in campaigns campaign_items orders; do
+        docker run --rm --entrypoint sh "$SIMG" -c "cat $SQLDIR/$f.sql" \
+            | docker exec -i "$MYSQL_CONTAINER" mysql -uroot -p"$MYSQL_ROOT_PW" dev_store 2>/dev/null || true
+    done
+    echo "created the missing store tables"
 else
-  echo "orders table already present — skipping"
+    echo "store tables present"
 fi
 
-# ----- 4. discovery: market stub + public external addresses ---------------
-step "4. discovery (market stub + external host -> $PUBLIC_HOST)"
-DISCOVERY_JSON="$ANTHILL_DIR/discovery/discovery-services.json"
-PUBLIC_HOST="$PUBLIC_HOST" "$PYTHON" - "$DISCOVERY_JSON" <<'PY'
-import json, os, sys, re
-path = sys.argv[1]; host = os.environ["PUBLIC_HOST"]
-d = json.load(open(path, encoding="utf-8")); svc = d["services"]
-# the game's DISCOVER list needs a market service anthill-dev lacks -> stub to store
-if "market" not in svc and "store" in svc:
-    svc["market"] = dict(svc["store"])
-# rewrite every external URL host to the public host, keep the port
-for s in svc.values():
-    ext = s.get("external")
-    if ext:
-        s["external"] = re.sub(r"http://[^:/]+:", "http://%s:" % host, ext)
-json.dump(d, open(path, "w", encoding="utf-8"), indent=4)
-print("discovery services:", ", ".join(sorted(svc)))
-PY
-docker restart anthill_discovery >/dev/null
-
-# env discovery location must be reachable by clients too
-myq dev_environment <<SQL
-UPDATE environments SET environment_discovery='http://$PUBLIC_HOST:9502' WHERE environment_id=1;
-SQL
-
-# ----- 5. provision game servers + server dev account ----------------------
-step "5. provision game servers (free + lobby) + server dev account"
-wait_for "dev_game.game_servers" table_exists dev_game game_servers
+# ----- 8. game servers, deployment, economy --------------------------------
+step "8. game servers and economy"
+export MYSQL_CONTAINER MYSQL_ROOT_PW GAMESPACE_ID GAME VERSION DEPLOYMENT_ID SRV_PASS SALT
 bash "$HERE/provision.sh"
 
-# ----- 6. stage the deployment ---------------------------------------------
-step "6. stage server deployment"
 STAGE="$ANTHILL_DIR/data/game-controller/binaries/runtime/$GAME/$VERSION/$DEPLOYMENT_ID"
-bash "$HERE/build-deployment.sh" "$STAGE"
+SERVER_DIR="$SERVER_DIR" bash "$HERE/build-deployment.sh" "$STAGE"
+cp "$STATE_DIR/service-rewrite.json" "$STAGE/service-rewrite.json"
 
-# ----- 7. economy seed ------------------------------------------------------
-step "7. seed economy (currencies + starter store catalog)"
 bash "$HERE/seed-economy.sh"
 
-# ----- 8. recreate controller with the generated override ------------------
-step "8. recreate controller"
-dc up -d --no-build --force-recreate anthill_game_controller
-wait_for "controller<->master" bash -c \
-  "docker logs anthill_game_controller --since 120s 2>&1 | grep -q 'Connected to Game Master'"
+# ----- 9. restart what read the changed config ------------------------------
+step "9. restart services"
+docker restart anthill_store anthill_discovery anthill_login anthill_market >/dev/null
+dc up -d --no-build --force-recreate anthill_game_controller brainout_nginx
+wait_for "controller connected to the game master" bash -c \
+    "docker logs anthill_game_controller --since 3m 2>&1 | grep -q 'Connected to Game Master'"
 
-# ----- 9. verify ------------------------------------------------------------
-step "9. verify"
-echo -n "env  -> "; curl -s -m 8 "http://$PUBLIC_HOST:9503/$GAME/$VERSION" || true; echo
-echo -n "disc -> "; curl -s -m 8 "http://$PUBLIC_HOST:9502/services/login,game,market" -o /dev/null -w "%{http_code}" || true; echo
+# ----- 10. verify -----------------------------------------------------------
+step "10. verify"
+bash "$HERE/check.sh" || true
 
+ENV_URL="https://$PUBLIC_HOST:$((9503 + TLS_PORT_OFFSET))"
 cat <<DONE
 
-Backend is up for $GAME:$VERSION on $PUBLIC_HOST.
-  * desktop client:  java -Dbrainout.env_service=http://$PUBLIC_HOST:9503 -jar bin/client/brainout-desktop.jar --unsafe
-  * android APK:     ./gradlew :android:assembleDebug -PwithAndroid -PbrainoutOnline=true -PbrainoutEnvService=http://$PUBLIC_HOST:9503
+Backend for $GAME:$VERSION is up on $PUBLIC_HOST.
 
-If PUBLIC_HOST is a real server, open the firewall:
-  * TCP 9500-9518            (anthill services)
-  * TCP+UDP $PORTS_FROM-$PORTS_TO   (game rooms — kryonet needs UDP too)
+Router port forwarding (to this machine):
+  TCP      $((9501 + TLS_PORT_OFFSET))-$((9519 + TLS_PORT_OFFSET))   HTTPS services
+  TCP+UDP  $PORTS_FROM-$PORTS_TO   game rooms
+
+APK settings (GitHub -> Settings -> Secrets and variables -> Actions -> Variables):
+  BRAINOUT_ENV_SERVICE = $ENV_URL
+  BRAINOUT_SERVER_CA   = contents of $TLS_DIR/ca.crt
+
+Back up $STATE_DIR (passwords, CA key) and set up backup.sh (docs/ServerSetup.md).
 DONE

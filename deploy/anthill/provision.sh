@@ -14,13 +14,16 @@ set -euo pipefail
 
 MYSQL_CONTAINER="${MYSQL_CONTAINER:-mysql}"
 MYSQL_ROOT_PW="${MYSQL_ROOT_PW:-Root123}"
-PASSWORDS_SALT="${PASSWORDS_SALT:-t6YJbMTvMRnYyPW7WfZC2tGXUsJwy252pU0OiCM5}"   # login: passwords_salt
+# login's passwords_salt (deploy.sh reads it from docker-compose.yml)
+SALT="${SALT:-${PASSWORDS_SALT:-t6YJbMTvMRnYyPW7WfZC2tGXUsJwy252pU0OiCM5}}"
 GAMESPACE_ID="${GAMESPACE_ID:-1}"
 GAME="${GAME:-brainout}"
 VERSION="${VERSION:-valpha2}"
 DEPLOYMENT_ID="${DEPLOYMENT_ID:-1}"
 SRV_USER="${SRV_USER:-brainout_server}"   # dev:<SRV_USER>
-SRV_PASS="${SRV_PASS:-srvpass123}"
+# The account can sign in through the public login service and its scopes can
+# rewrite any profile, so there is no default password (deploy.sh generates one).
+SRV_PASS="${SRV_PASS:?SRV_PASS is not set (deploy.sh generates it in state/secrets.env)}"
 
 # scopes the server-side token may carry (must cover ServerConstants.Online.EXTEND_SCOPES
 # so the server can extend joining players' tokens), plus auth_non_unique for the
@@ -33,7 +36,9 @@ DISCOVER='["login","game","message","profile","leaderboard","report","social","s
 
 CRED="dev:${SRV_USER}"
 # HMACSHA256(key=credential+salt, msg=password) -> base64  (PasswordsModel default algo)
-HASH=$(python -c "import hmac,hashlib,base64;print(base64.b64encode(hmac.new(key=bytes('${CRED}${PASSWORDS_SALT}','utf-8'),msg='${SRV_PASS}'.encode(),digestmod=hashlib.sha256).digest()).decode())")
+PY="$(command -v python3 || command -v python)"
+HASH=$(CRED="$CRED" SALT="$SALT" PW="$SRV_PASS" "$PY" -c \
+    'import base64,hashlib,hmac,os;print(base64.b64encode(hmac.new((os.environ["CRED"]+os.environ["SALT"]).encode(),os.environ["PW"].encode(),hashlib.sha256).digest()).decode())')
 
 myq() { docker exec -i "$MYSQL_CONTAINER" mysql -uroot -p"$MYSQL_ROOT_PW" "$1" 2>/dev/null; }
 

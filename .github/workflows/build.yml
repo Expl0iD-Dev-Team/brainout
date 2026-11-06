@@ -8,8 +8,11 @@
 #       release signing, created by scripts/setup-release-signing.sh. Without them
 #       untagged builds fall back to a debug-signed APK; tagged builds fail.
 #   vars.BRAINOUT_ENV_SERVICE
-#       backend URL, e.g. https://env.example.com. Without it the APK is the
+#       backend URL, e.g. https://203.0.113.10:19503. Without it the APK is the
 #       offline / direct-connect build.
+#   vars.BRAINOUT_SERVER_CA
+#       PEM of the backend's private CA (deploy/anthill/state/tls/ca.crt); the
+#       APK trusts it in addition to the system CAs.
 name: Build
 
 on:
@@ -32,6 +35,7 @@ jobs:
       KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ENV_SERVICE: ${{ vars.BRAINOUT_ENV_SERVICE }}
+      SERVER_CA: ${{ vars.BRAINOUT_SERVER_CA }}
     steps:
       - uses: actions/checkout@v7
 
@@ -92,6 +96,12 @@ jobs:
           )
           if [[ -n "$ENV_SERVICE" ]]; then
             args+=(-PbrainoutOnline=true -PbrainoutEnvService="$ENV_SERVICE")
+          fi
+          if [[ -n "$SERVER_CA" ]]; then
+            printf '%s\n' "$SERVER_CA" > "$RUNNER_TEMP/server-ca.crt"
+            args+=(-PbrainoutServerCa="$RUNNER_TEMP/server-ca.crt")
+          elif [[ "$ENV_SERVICE" == https://* ]]; then
+            echo "::warning::BRAINOUT_SERVER_CA is not set: the APK only trusts public CAs"
           fi
           ./gradlew "${args[@]}"
 

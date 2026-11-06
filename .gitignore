@@ -86,3 +86,6 @@ bin/ch/brainout.jar
 bin/chserver/brainout-server-ch.jar
 bin/server/brainout-server-o.jar
 /keys/brainout.pem
+# backend deployment: settings, generated passwords, CA key, rendered config
+deploy/anthill/config.env
+deploy/anthill/state/

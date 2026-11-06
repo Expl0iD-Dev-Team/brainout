@@ -9,34 +9,37 @@ controller → Java server spawns, online-inits (server token + discovery),
 registers the room → master returns the join location to the client. The room
 shows `state=SPAWNED` and the server runs the live freeplay loop.
 
-## Deploy (one command)
+## Deploy
 
-`deploy.sh` brings the whole backend up from scratch and is idempotent — it ties
-together every step that used to be manual (the upstream stack, keys, the
-brainout registration, the scope/FK/market fixes, the JRE-17 controller image,
-game-server provisioning, deployment staging and the economy seed).
+`deploy.sh` brings the whole backend up on one Linux host and is safe to re-run.
+Step-by-step guide (Russian): [docs/ServerSetup.md](../../docs/ServerSetup.md).
 
 ```bash
-# prereq: build the server payload once
-./gradlew server:dist make_data
-
-# local
+cp deploy/anthill/config.env.example deploy/anthill/config.env   # set PUBLIC_HOST, SERVER_BUNDLE
 ./deploy/anthill/deploy.sh
-
-# real server — clients connect to PUBLIC_HOST
-PUBLIC_HOST=203.0.113.10 ./deploy/anthill/deploy.sh
+./deploy/anthill/check.sh
 ```
 
-It clones `anthill-dev` next to the repo if missing (override `ANTHILL_DIR`),
-generates the controller override (JRE-17 image, `gs_host=$PUBLIC_HOST`, a
-narrowed `38000-38020` port pool), points the env discovery location and every
-discovery `external` address at `$PUBLIC_HOST`, and finishes by verifying
-env→discovery. On a real host, open the firewall it prints: **TCP 9500-9518**
-and **TCP+UDP 38000-38020** (kryonet needs UDP).
+On top of the pinned upstream `anthill-dev` stack it:
 
-The individual scripts (`provision.sh`, `seed-economy.sh`,
-`build-deployment.sh`, `controller.Dockerfile`) are still usable on their own;
-the sections below explain the pieces `deploy.sh` orchestrates.
+- binds every container port to `127.0.0.1` and puts **nginx** in front of the
+  services the game uses, with HTTPS on `19501-19519` (`TLS_PORT_OFFSET`). The
+  certificate comes from a private CA (`tls.sh`), so no domain is needed; the
+  APK is built to trust that CA (`BRAINOUT_SERVER_CA`). nginx sets `X-Real-IP`,
+  otherwise Anthill would treat every proxied request as internal.
+- generates random passwords for the `dev:root` account (reachable through the
+  public login service) and the game server account (`state/secrets.env`), and
+  keeps admin scopes out of the player gamespace.
+- builds and runs the real `anthill-market` service instead of the store stub.
+- registers the game, provisions the `free`/`lobby` game servers, stages the
+  deployment and seeds the starter economy.
+
+Spawned game servers get the public HTTPS addresses from the game master;
+`run.sh` rewrites them to `http://127.0.0.1:<port>` (`service-rewrite.json`), so
+the server never goes out through the router to reach the backend.
+
+`backup.sh` / `restore.sh` dump and load the Anthill databases; `check.sh` is the
+health check `deploy.sh` ends with.
 
 ## How spawning works (what we reverse-engineered)
 
@@ -61,27 +64,12 @@ The master fills `login_access_token`/`discovery_services` only if the
    (`anthill-run.sh`) points `-Djava.io.tmpdir=/opt/brainout-tmp` (an exec dir
    baked into the image).
 
-## Steps (local anthill-dev stack)
+## Steps by hand
 
-Prereqs: the anthill-dev stack is up and brainout is registered
-(`docs/OnlinePlatformLocal.md`), and `bin/server` is built
-(`./gradlew server:dist make_data`).
-
-```bash
-cd deploy/anthill
-
-# 1) controller image with a JRE
-docker build -f controller.Dockerfile -t brainout/anthill-game-controller:jre17 .
-cp docker-compose.override.yml <anthill-dev>/dev/
-( cd <anthill-dev>/dev && docker compose up -d --no-build anthill_game_controller )
-
-# 2) stage the deployment into the controller's host-mounted binaries dir
-#    (.../runtime/<game>/<version>/<deployment_id>/)
-./build-deployment.sh <anthill-dev>/dev/data/game-controller/binaries/runtime/brainout/valpha2/1
-
-# 3) provision the DB (game server/version/deployment + server dev account)
-./provision.sh
-```
+`deploy.sh` runs these in order; each also works on its own once the stack is up:
+`controller.Dockerfile` (controller image with a JRE), `provision.sh` (game
+servers + server account, needs `SRV_PASS`), `build-deployment.sh <dir>` (stage
+the server build), `seed-economy.sh` (currencies and store catalog).
 
 ### Trigger a match
 

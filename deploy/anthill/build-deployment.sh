@@ -10,17 +10,20 @@
 #   build-deployment.sh <dest_dir>
 #   build-deployment.sh ../../path/to/anthill-dev/dev/data/game-controller/binaries/runtime/brainout/valpha2/1
 #
-# Requires bin/server to be built first:  ./gradlew server:dist make_data
+# The server build comes from SERVER_DIR (default bin/server, produced by
+# ./gradlew server:dist make_data; deploy.sh points it at an unpacked CI bundle).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-SRC="$REPO/bin/server"
+SRC="${SERVER_DIR:-$REPO/bin/server}"
 DEST="${1:?usage: build-deployment.sh <dest_dir>}"
 
 [ -f "$SRC/brainout-server.jar" ] || { echo "missing $SRC/brainout-server.jar (run ./gradlew server:dist)"; exit 1; }
 [ -d "$SRC/packages" ]            || { echo "missing $SRC/packages (run ./gradlew make_data)"; exit 1; }
 
+# start clean so files dropped from a newer build don't linger
+case "$DEST" in */runtime/*) rm -rf "$DEST" ;; esac
 mkdir -p "$DEST"
 # server payload (jar, packages, maps, mode/settings json, shuffles, greetings)
 cp -r "$SRC/." "$DEST"/
