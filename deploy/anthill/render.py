@@ -114,6 +114,11 @@ def render_override(services):
         # ../<service> contexts are not in anthill-dev; use the prebuilt images
         if svc["build"] and svc["build"].startswith(".."):
             lines.append("    build: !reset null")
+        # Monitoring dashboards the game doesn't need; upstream's collectd image
+        # doesn't even start (its start.sh isn't executable). Start them with
+        # `docker compose --profile monitoring up -d` if wanted.
+        if name in ("collectd", "grafana"):
+            lines.append("    profiles: [\"monitoring\"]")
         if name == "anthill_login":
             lines += ["    environment:",
                       "      root_user_password: %s" % q(ROOT_PASSWORD)]

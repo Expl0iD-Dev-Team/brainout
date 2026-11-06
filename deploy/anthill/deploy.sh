@@ -57,7 +57,8 @@ fi
 set -a; . "$STATE_DIR/secrets.env"; set +a
 [ -n "${ROOT_PASSWORD:-}" ] && [ -n "${SRV_PASS:-}" ] || die "secrets.env is missing ROOT_PASSWORD or SRV_PASS"
 
-bash "$HERE/tls.sh" "$TLS_DIR" "$PUBLIC_HOST" | grep -vE '^[.+*-]|^$' || true
+# openssl prints key generation progress (".+++") on stderr
+bash "$HERE/tls.sh" "$TLS_DIR" "$PUBLIC_HOST" 2>&1 | grep -vE '^[.+*-]|^$' || true
 
 # ----- 2. upstream sources --------------------------------------------------
 step "2. upstream sources (pinned)"
@@ -65,7 +66,9 @@ checkout() { # checkout <repo url> <dir> <ref>
     if [ ! -d "$2/.git" ]; then
         git clone -q "$1" "$2"
     fi
-    git -C "$2" fetch -q origin
+    # only go to the network when the pinned commit isn't here yet, so a
+    # redeploy works even while GitHub is unreachable
+    git -C "$2" cat-file -e "$3^{commit}" 2>/dev/null || git -C "$2" fetch -q origin
     git -C "$2" -c advice.detachedHead=false checkout -q "$3"
     echo "$(basename "$2") at $(git -C "$2" rev-parse --short HEAD)"
 }
@@ -73,8 +76,11 @@ checkout() { # checkout <repo url> <dir> <ref>
 git -C "$(dirname "$ANTHILL_DIR")" checkout -q -- . 2>/dev/null || true
 checkout "$ANTHILL_REPO" "$(dirname "$ANTHILL_DIR")" "$ANTHILL_REF"
 checkout "$MARKET_REPO" "$MARKET_DIR" "$MARKET_REF"
-# CRLF in *.sh breaks the keygen when the sources were checked out on Windows
-find "$(dirname "$ANTHILL_DIR")" -name '*.sh' -not -path '*/.git/*' -exec sed -i 's/\r$//' {} + 2>/dev/null || true
+# anthill-dev commits its container scripts (keys/setup.sh, collectd/start.sh)
+# without the executable bit, and CRLF from a Windows checkout breaks them too;
+# without a working keygen no Anthill service starts.
+find "$(dirname "$ANTHILL_DIR")" -name '*.sh' -not -path '*/.git/*' \
+    -exec sed -i 's/\r$//' {} + -exec chmod +x {} + 2>/dev/null || true
 
 # ----- 3. configuration -----------------------------------------------------
 step "3. render configuration"
@@ -88,7 +94,15 @@ echo "compose configuration is valid"
 step "4. images"
 docker build -q -f "$HERE/controller.Dockerfile" -t "$CONTROLLER_IMAGE" "$HERE"
 docker build -q -t "$MARKET_IMAGE" "$MARKET_DIR"
-dc pull -q --ignore-buildable
+# the controller and market images were just built here; there is nothing to pull
+pull_services="$(dc config --services | grep -vxE 'anthill_game_controller|anthill_market')"
+# a dropped connection mid-download is common on home links; layers already
+# fetched are kept, so a retry only resumes what is missing
+for attempt in 1 2 3; do
+    dc pull -q --ignore-buildable $pull_services && break
+    [ "$attempt" = 3 ] && die "could not pull the images (see the errors above)"
+    echo "pull failed, retrying ($attempt/3)"; sleep 10
+done
 dc build -q
 
 # ----- 5. start -------------------------------------------------------------
@@ -97,9 +111,12 @@ dc up -d --no-build --remove-orphans
 wait_for "keys"  test -f "$ANTHILL_DIR/keys/public/anthill.pub"
 wait_for "mysql" bash -c "docker exec $MYSQL_CONTAINER mysqladmin -uroot -p$MYSQL_ROOT_PW ping 2>/dev/null | grep -q alive"
 echo "CREATE DATABASE IF NOT EXISTS dev_market;" | myq mysql
-wait_for "dev_login schema" table_exists dev_login credential_passwords
-wait_for "dev_store schema" table_exists dev_store stores
-wait_for "dev_game schema"  table_exists dev_game game_servers
+wait_for "dev_login schema"       table_exists dev_login credential_passwords
+wait_for "dev_login gamespaces"   table_exists dev_login gamespace
+wait_for "dev_environment schema" table_exists dev_environment applications
+wait_for "dev_environment envs"   table_exists dev_environment environments
+wait_for "dev_store schema"       table_exists dev_store stores
+wait_for "dev_game schema"        table_exists dev_game game_servers
 echo "stack up"
 
 # ----- 6. accounts and registration ----------------------------------------
@@ -139,19 +156,33 @@ UPDATE environments SET environment_discovery='https://$PUBLIC_HOST:$((9502 + TL
  WHERE environment_id=1;
 SQL
 
-# ----- 7. store FK fix ------------------------------------------------------
-step "7. store tables"
-if ! table_exists dev_store orders; then
-    SIMG=anthillplatform/anthill-store:latest
-    SQLDIR=/usr/local/lib/python3.7/site-packages/anthill/store/sql
-    # the store creates `orders` before `campaigns`, which its foreign key needs
-    for f in campaigns campaign_items orders; do
-        docker run --rm --entrypoint sh "$SIMG" -c "cat $SQLDIR/$f.sql" \
-            | docker exec -i "$MYSQL_CONTAINER" mysql -uroot -p"$MYSQL_ROOT_PW" dev_store 2>/dev/null || true
+# ----- 7. tables the services fail to create --------------------------------
+step "7. missing tables"
+# Some services create a table before the tables its foreign keys point at, so
+# on a fresh database that table is never made and the service breaks later:
+#   store:       orders -> campaigns           (orders can't be placed)
+#   game master: rooms  -> hosts, deployments  (the controller is dropped on
+#                its first heartbeat, so no game server ever starts)
+# Create them from the service's own SQL, in dependency order.
+create_missing_tables() { # <db> <image> <python package> <table...>
+    local db="$1" image="$2" pkg="$3"; shift 3
+    local sqldir="/usr/local/lib/python3.7/site-packages/anthill/$pkg/sql" made=""
+    for t in "$@"; do
+        table_exists "$db" "$t" && continue
+        docker run --rm --entrypoint sh "$image" -c "cat $sqldir/$t.sql" \
+            | docker exec -i "$MYSQL_CONTAINER" mysql -uroot -p"$MYSQL_ROOT_PW" "$db" 2>&1 \
+            | grep -vE "Using a password on the command line|Found option without preceding group" || true
+        table_exists "$db" "$t" || die "could not create $db.$t"
+        made="$made $t"
     done
-    echo "created the missing store tables"
-else
-    echo "store tables present"
+    echo "$db:${made:- nothing missing}"
+    [ -n "$made" ]
+}
+if create_missing_tables dev_store anthillplatform/anthill-store:latest store campaigns campaign_items orders; then
+    docker restart anthill_store >/dev/null
+fi
+if create_missing_tables dev_game anthillplatform/anthill-game-master:latest game/master rooms; then
+    docker restart anthill_game_master >/dev/null
 fi
 
 # ----- 8. game servers, deployment, economy --------------------------------
@@ -160,6 +191,13 @@ export MYSQL_CONTAINER MYSQL_ROOT_PW GAMESPACE_ID GAME VERSION DEPLOYMENT_ID SRV
 bash "$HERE/provision.sh"
 
 STAGE="$ANTHILL_DIR/data/game-controller/binaries/runtime/$GAME/$VERSION/$DEPLOYMENT_ID"
+# Docker creates the controller's bind-mounted binaries dir as root; hand it to
+# this user (through a throwaway container, so no sudo is needed) to stage into it.
+BINARIES="$ANTHILL_DIR/data/game-controller/binaries"
+mkdir -p "$BINARIES" 2>/dev/null || true
+if [ ! -w "$BINARIES" ] || [ -n "$(find "$BINARIES" ! -user "$(id -u)" -print -quit 2>/dev/null)" ]; then
+    docker run --rm -v "$BINARIES:/d" alpine:3 chown -R "$(id -u):$(id -g)" /d
+fi
 SERVER_DIR="$SERVER_DIR" bash "$HERE/build-deployment.sh" "$STAGE"
 cp "$STATE_DIR/service-rewrite.json" "$STAGE/service-rewrite.json"
 

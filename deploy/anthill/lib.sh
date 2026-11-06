@@ -84,7 +84,7 @@ dc() { ( cd "$ANTHILL_DIR" && docker compose "$@" ); }
 # server itself even when the router has no NAT loopback.
 https_get() { # https_get <service port> <path>
     local port=$(( $1 + TLS_PORT_OFFSET ))
-    curl -sS -m 10 --cacert "$TLS_DIR/ca.crt" \
+    curl -sS -m 10 --noproxy '*' --cacert "$TLS_DIR/ca.crt" \
         --connect-to "$PUBLIC_HOST:$port:127.0.0.1:$port" \
         "https://$PUBLIC_HOST:$port$2"
 }

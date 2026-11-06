@@ -14,17 +14,26 @@ warn() { printf '  WARN  %s\n' "$*"; }
 [ -n "$PUBLIC_HOST" ] || { echo "PUBLIC_HOST is not set (config.env)"; exit 1; }
 
 echo "containers:"
-expected="mysql redis rabbitmq brainout_nginx anthill_login anthill_discovery anthill_environment anthill_profile
-anthill_game anthill_game_controller anthill_store anthill_market anthill_message anthill_social anthill_event
+expected="mysql dev-redis-1 rabbitmq brainout_nginx anthill_login anthill_discovery anthill_environment anthill_profile
+anthill_game_master anthill_game_controller anthill_store anthill_market anthill_message anthill_social anthill_event
 anthill_leaderboard anthill_promo anthill_static anthill_report anthill_blog"
+now="$(date +%s)"
 for c in $expected; do
-    state="$(docker inspect -f '{{.State.Status}} {{.RestartCount}}' "$c" 2>/dev/null)"
-    case "$state" in
-        "running "*)
-            restarts="${state#running }"
-            if [ "$restarts" -gt 5 ] 2>/dev/null; then warn "$c running, restarted $restarts times"; else ok "$c"; fi ;;
+    state="$(docker inspect -f '{{.State.Status}} {{.RestartCount}} {{.State.StartedAt}}' "$c" 2>/dev/null)"
+    read -r status restarts started_at <<< "$state"
+    case "$status" in
+        running)
+            started="$(date -d "$started_at" +%s 2>/dev/null || echo 0)"
+            # A crash-looping container shows as "running" between restarts.
+            # RestartCount only counts Docker's automatic restarts, so a fresh
+            # start that followed one of those means it is still crashing.
+            if [ "${restarts:-0}" -gt 0 ] && [ $((now - started)) -lt 60 ]; then
+                warn "$c restarted by Docker $restarts times, last start ${started_at%.*} (crash loop?)"
+            else
+                ok "$c"
+            fi ;;
         "") bad "$c does not exist" ;;
-        *)  bad "$c is $state" ;;
+        *)  bad "$c is $status" ;;
     esac
 done
 
@@ -37,7 +46,7 @@ if echo "$disc_reply" | grep -q '"market"'; then ok "discovery lists login, game
 
 for svc in login:9501 profile:9512 game:9508 store:9516 market:9519 message:9511; do
     name="${svc%%:*}"; port="${svc##*:}"
-    code="$(curl -s -o /dev/null -m 10 -w '%{http_code}' --cacert "$TLS_DIR/ca.crt" \
+    code="$(curl -s -o /dev/null -m 10 -w '%{http_code}' --noproxy '*' --cacert "$TLS_DIR/ca.crt" \
         --connect-to "$PUBLIC_HOST:$((port + TLS_PORT_OFFSET)):127.0.0.1:$((port + TLS_PORT_OFFSET))" \
         "https://$PUBLIC_HOST:$((port + TLS_PORT_OFFSET))/")"
     # any HTTP answer means nginx, TLS and the service are wired up; 000 means no answer
@@ -52,7 +61,9 @@ else
 fi
 
 echo "game controller:"
-if docker logs anthill_game_controller --since 24h 2>&1 | grep -q 'Connected to Game Master'; then
+# not grep -q: it exits on the first match, docker logs then dies of SIGPIPE and
+# pipefail turns the whole pipeline into a failure once the log is long
+if docker logs anthill_game_controller --since 24h 2>&1 | grep 'Connected to Game Master' >/dev/null; then
     ok "connected to the game master"
 else
     bad "no 'Connected to Game Master' in the controller log for 24h"

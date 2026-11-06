@@ -25,3 +25,12 @@ RUN mkdir -p /opt/brainout-tmp && chmod 1777 /opt/brainout-tmp
 
 # sanity: fail the build if java isn't runnable
 RUN java -version
+
+# Reach login and the game master on localhost instead of their public HTTPS
+# addresses (see controller_local_discovery.py). The build fails if the patch
+# no longer applies to the image's anthill-common.
+COPY controller_local_discovery.py /tmp/brainout_local_discovery.py
+RUN SP="$(python3 -c 'import site; print(site.getsitepackages()[0])')" \
+ && mv /tmp/brainout_local_discovery.py "$SP/brainout_local_discovery.py" \
+ && echo "import brainout_local_discovery" > "$SP/brainout_local_discovery.pth" \
+ && python3 -c "from anthill.common import discover as d; assert d.Discovery.get_service_external.__name__ == 'get_service_local'"
