@@ -53,6 +53,14 @@ public class AndroidEnvironment extends ClientEnvironment
     }
 
     @Override
+    public boolean greenlightEnabled()
+    {
+        // The lobby otherwise nags with "Get this game on Steam!" and a link to
+        // the original game's store page, which means nothing for this build.
+        return false;
+    }
+
+    @Override
     public String getStoreComponent()
     {
         // No real payment provider is wired up on Android yet, so IAP tiers can't

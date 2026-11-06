@@ -391,11 +391,18 @@ public class MarketMenu extends Menu
             return null;
         }
 
-        String[] names = JSONObject.getNames(filter);
+        // JSONObject.getNames() isn't in Android's built-in org.json; names() is
+        JSONArray keys = filter.names();
 
-        if (names == null)
+        if (keys == null)
         {
             return null;
+        }
+
+        String[] names = new String[keys.length()];
+        for (int i = 0; i < names.length; i++)
+        {
+            names[i] = keys.getString(i);
         }
 
         JSONObject o = new JSONObject(filter, names);

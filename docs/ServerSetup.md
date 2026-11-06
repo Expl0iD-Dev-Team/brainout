@@ -156,6 +156,8 @@ sudo ./deploy/anthill/restore.sh /var/backups/brainout/db-<время>.sql.gz
 | Задача | Команда |
 |---|---|
 | Новая версия сервера | укажите новый архив в `SERVER_BUNDLE` и запустите `./deploy/anthill/deploy.sh` |
+| Сменился внешний IP | исправьте `PUBLIC_HOST`, запустите `deploy.sh`, обновите переменную `BRAINOUT_ENV_SERVICE` и выдайте игрокам новый APK. CA остаётся прежним |
+| Больше одновременных игр | каждая игра занимает 3 порта из `PORTS_FROM`–`PORTS_TO`: 21 порт хватает на 7 игр, включая лобби. Расширьте диапазон и проброс в роутере |
 | Состояние | `./deploy/anthill/check.sh` |
 | Логи сервиса | `docker logs --tail 100 anthill_login`, имя контейнера можно взять из `docker ps` |
 | Логи игровых серверов | `ls ../anthill-dev/dev/data/game-controller/logs` |

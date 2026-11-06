@@ -190,6 +190,17 @@ step "8. game servers and economy"
 export MYSQL_CONTAINER MYSQL_ROOT_PW GAMESPACE_ID GAME VERSION DEPLOYMENT_ID SRV_PASS SALT
 bash "$HERE/provision.sh"
 
+# The controller registers itself as a host under PUBLIC_HOST. A host left over
+# from an earlier address stays ACTIVE in the master's table, and the master
+# keeps sending spawns to it (NO_ROUTE, so no game ever starts). Drop such hosts
+# together with their rooms.
+myq dev_game <<SQL
+DELETE p FROM players p JOIN rooms r ON r.room_id = p.room_id JOIN hosts h ON h.host_id = r.host_id
+ WHERE h.host_address <> '$PUBLIC_HOST';
+DELETE r FROM rooms r JOIN hosts h ON h.host_id = r.host_id WHERE h.host_address <> '$PUBLIC_HOST';
+DELETE FROM hosts WHERE host_address <> '$PUBLIC_HOST';
+SQL
+
 STAGE="$ANTHILL_DIR/data/game-controller/binaries/runtime/$GAME/$VERSION/$DEPLOYMENT_ID"
 # Docker creates the controller's bind-mounted binaries dir as root; hand it to
 # this user (through a throwaway container, so no sudo is needed) to stage into it.
@@ -205,7 +216,16 @@ bash "$HERE/seed-economy.sh"
 
 # ----- 9. restart what read the changed config ------------------------------
 step "9. restart services"
-docker restart anthill_store anthill_discovery anthill_login anthill_market >/dev/null
+# Discovery reads discovery-services.json only for services it doesn't know yet
+# and keeps the rest in Redis (db 15), so a changed PUBLIC_HOST or port would
+# never reach the clients. Clear it so the file is loaded afresh.
+dc exec -T redis redis-cli -n 15 FLUSHDB >/dev/null
+docker restart anthill_discovery >/dev/null
+wait_for "discovery" bash -c "curl -s --noproxy '*' http://127.0.0.1:9502/services/login | grep -q $PUBLIC_HOST"
+# every other service caches the addresses it discovered, so restart them all
+anthill_services="$(dc config --services | grep -E '^anthill_' \
+    | grep -vxE 'anthill_discovery|anthill_game_controller|anthill_common|anthill_keygen')"
+dc restart $anthill_services >/dev/null 2>&1
 dc up -d --no-build --force-recreate anthill_game_controller brainout_nginx
 wait_for "controller connected to the game master" bash -c \
     "docker logs anthill_game_controller --since 3m 2>&1 | grep -q 'Connected to Game Master'"
