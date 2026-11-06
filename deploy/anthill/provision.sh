@@ -40,7 +40,11 @@ PY="$(command -v python3 || command -v python)"
 HASH=$(CRED="$CRED" SALT="$SALT" PW="$SRV_PASS" "$PY" -c \
     'import base64,hashlib,hmac,os;print(base64.b64encode(hmac.new((os.environ["CRED"]+os.environ["SALT"]).encode(),os.environ["PW"].encode(),hashlib.sha256).digest()).decode())')
 
-myq() { docker exec -i "$MYSQL_CONTAINER" mysql -uroot -p"$MYSQL_ROOT_PW" "$1" 2>/dev/null; }
+# real SQL errors stay visible; only the client's known noise is dropped
+myq() {
+    docker exec -i "$MYSQL_CONTAINER" mysql -uroot -p"$MYSQL_ROOT_PW" "$1" 2>&1 \
+        | grep -vE "Using a password on the command line|Found option without preceding group" || true
+}
 
 echo "== dev_login: server dev account ($CRED) + scopes =="
 myq dev_login <<SQL
@@ -57,32 +61,50 @@ INSERT INTO account_access (account_id, gamespace_id, scopes) VALUES (@aid, $GAM
 SQL
 
 echo "== dev_game: game server / version / deployment =="
-myq dev_game <<SQL
-INSERT INTO game_servers (gamespace_id, game_name, game_server_name, \`schema\`, max_players, game_settings, server_settings)
-VALUES ($GAMESPACE_ID, '$GAME', 'free', '{}', 32,
- '{"binary":"run.sh","ports":3,"max_players":32,"arguments":["--mode","free","--settings","server-free.json","--map","freeplay-maps.shuffle"],"token":{"authenticate":true,"username":"$SRV_USER","password":"$SRV_PASS","scopes":"$TOKEN_SCOPES"},"discover":$DISCOVER}',
- '{}')
-ON DUPLICATE KEY UPDATE game_settings=VALUES(game_settings), max_players=VALUES(max_players);
-SET @gsid = (SELECT game_server_id FROM game_servers WHERE gamespace_id=$GAMESPACE_ID AND game_name='$GAME' AND game_server_name='free');
-INSERT INTO game_server_versions (gamespace_id, game_name, game_version, game_server_id, server_settings)
-VALUES ($GAMESPACE_ID, '$GAME', '$VERSION', @gsid, '{}')
-ON DUPLICATE KEY UPDATE server_settings=VALUES(server_settings);
+# Bots topping up a Quick Play match ("bots" in the server settings, like the
+# original "Run Server Game Phase.bat"); handy while only a few friends play.
+BOTS_MAIN="${BOTS_MAIN:-6}"
 
--- The client does NOT go straight into a match: after login it joins the "lobby"
--- game server (CSFindLobby -> joinGame(..., "lobby", auto_create=true)), so it
--- must exist or the client errors with 404.
--- NOTE: --map takes a FILE PATH (MapSource does Gdx.files.absolute(map)), so it
--- is 'maps/lobby.map', not 'lobby'.
+# game_server <name> <max players> <server settings JSON> <server arguments JSON>
+# The name is what the client asks the game master for (Matchmaking.FindGame).
+# --map/--maps take FILE PATHS relative to the deployment (MapSource uses
+# Gdx.files.absolute), e.g. maps/lobby.map rather than lobby.
+game_server() {
+    cat <<SQL
 INSERT INTO game_servers (gamespace_id, game_name, game_server_name, \`schema\`, max_players, game_settings, server_settings)
-VALUES ($GAMESPACE_ID, '$GAME', 'lobby', '{}', 32,
- '{"binary":"run.sh","ports":3,"max_players":32,"arguments":["--mode","lobby","--settings","server-lobby.json","--map","maps/lobby.map"],"token":{"authenticate":true,"username":"$SRV_USER","password":"$SRV_PASS","scopes":"$TOKEN_SCOPES"},"discover":$DISCOVER}',
- '{}')
-ON DUPLICATE KEY UPDATE game_settings=VALUES(game_settings), max_players=VALUES(max_players);
-
-SET @lid = (SELECT game_server_id FROM game_servers WHERE gamespace_id=$GAMESPACE_ID AND game_name='$GAME' AND game_server_name='lobby');
+VALUES ($GAMESPACE_ID, '$GAME', '$1', '{}', $2,
+ '{"binary":"run.sh","ports":3,"max_players":$2,"arguments":$4,"token":{"authenticate":true,"username":"$SRV_USER","password":"$SRV_PASS","scopes":"$TOKEN_SCOPES"},"discover":$DISCOVER}',
+ '$3')
+ON DUPLICATE KEY UPDATE game_settings=VALUES(game_settings), max_players=VALUES(max_players), server_settings=VALUES(server_settings);
+SET @gsid = (SELECT game_server_id FROM game_servers WHERE gamespace_id=$GAMESPACE_ID AND game_name='$GAME' AND game_server_name='$1');
 INSERT INTO game_server_versions (gamespace_id, game_name, game_version, game_server_id, server_settings)
-VALUES ($GAMESPACE_ID, '$GAME', '$VERSION', @lid, '{}')
+VALUES ($GAMESPACE_ID, '$GAME', '$VERSION', @gsid, '$3')
 ON DUPLICATE KEY UPDATE server_settings=VALUES(server_settings);
+SQL
+}
+
+{
+    # After login the client joins the lobby (CSFindLobby), so without it nothing works.
+    game_server lobby    32 '{}' '["--mode","lobby","--settings","server-lobby.json","--map","maps/lobby.map"]'
+    # Lobby -> Quick Play (QuickPlayOptionsMenu): team modes over the map rotation.
+    game_server main     16 "{\"bots\":$BOTS_MAIN}" '["--settings","server-settings.json","--maps","maps-set.json"]'
+    # Not provisioned: "custom" (Steam Workshop maps, downloaded through the Steam
+    # API, which this build doesn't have) and "editor"/"editor2" (map editors).
+    # Lobby -> Free Play (CSFreeplaySolo); four players, as in the original setup.
+    game_server freeplay  4 '{}' '["--mode","free","--settings","server-free.json","--map","freeplay-maps.shuffle"]'
+    # Duel offered after a lobby challenge (CSDuel).
+    game_server duel      2 '{}' '["--mode","duel","--settings","server-duel.json","--map","maps/duel.map"]'
+
+    cat <<SQL
+-- Servers earlier deploys created that can't work: "free" (the client asks for
+-- "freeplay") and "custom" (needs Steam). Rooms reference servers, so drop theirs first.
+DELETE r FROM rooms r JOIN game_servers s ON s.game_server_id = r.game_server_id
+ WHERE s.gamespace_id=$GAMESPACE_ID AND s.game_name='$GAME' AND s.game_server_name IN ('free','custom');
+DELETE v FROM game_server_versions v JOIN game_servers s ON s.game_server_id = v.game_server_id
+ WHERE s.gamespace_id=$GAMESPACE_ID AND s.game_name='$GAME' AND s.game_server_name IN ('free','custom');
+DELETE FROM game_servers
+ WHERE gamespace_id=$GAMESPACE_ID AND game_name='$GAME' AND game_server_name IN ('free','custom');
+
 INSERT INTO deployments (deployment_id, gamespace_id, game_name, game_version, deployment_hash, deployment_status)
 VALUES ($DEPLOYMENT_ID, $GAMESPACE_ID, '$GAME', '$VERSION', 'local', 'delivered')
 ON DUPLICATE KEY UPDATE deployment_status='delivered';
@@ -90,6 +112,6 @@ INSERT INTO game_deployments (gamespace_id, game_name, game_version, current_dep
 VALUES ($GAMESPACE_ID, '$GAME', '$VERSION', $DEPLOYMENT_ID, 1)
 ON DUPLICATE KEY UPDATE current_deployment=$DEPLOYMENT_ID, deployment_enabled=1;
 SQL
+} | myq dev_game
 
-echo "Done. Stage the deployment files with build-deployment.sh, then create a room:"
-echo "  POST http://localhost:9508/create/$GAME/free/$VERSION  (access_token=..., settings={})"
+echo "game servers: $(echo "SELECT GROUP_CONCAT(game_server_name ORDER BY game_server_name) FROM game_servers WHERE gamespace_id=$GAMESPACE_ID AND game_name='$GAME';" | myq dev_game | tail -1)"
