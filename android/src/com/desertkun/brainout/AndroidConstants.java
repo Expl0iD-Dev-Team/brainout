@@ -2,6 +2,9 @@ package com.desertkun.brainout;
 
 public class AndroidConstants extends ClientConstants
 {
+    // Target height of the UI coordinate space, see AndroidEnvironment.getUIScale.
+    public static final float UI_HEIGHT = 720.0f;
+
     public static class Touch
     {
         // --- Floating sticks ---------------------------------------------
@@ -33,5 +36,15 @@ public class AndroidConstants extends ClientConstants
         // in-game HP bar / weapon-and-ammo HUD and the system nav bar.
         public static final float BUTTON_MARGIN_BOTTOM = 0.16f; // fraction of height
         public static final float BUTTON_MARGIN_RIGHT = 0.035f; // fraction of width
+
+        // Weapon slot row above the action buttons (square cells).
+        public static final float SLOT_SIZE = 0.095f;
+
+        // Utility row in the top-left corner (menu, players, chat, zoom, more)
+        // and the "more" panel that drops down from it.
+        public static final float SMALL_BUTTON_W = 0.17f;
+        public static final float SMALL_BUTTON_H = 0.085f;
+        public static final float SMALL_FONT_SCALE = 1.1f;
+        public static final float UTILITY_MARGIN = 0.02f; // fraction of the smaller dimension
     }
 }

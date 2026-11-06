@@ -53,6 +53,26 @@ public class AndroidEnvironment extends ClientEnvironment
     }
 
     @Override
+    public float getUIScale()
+    {
+        // The interface was laid out for desktop screens around 720 points tall.
+        // A phone in landscape is ~1080 px tall at ~3x density, which made every
+        // menu, label and the character itself tiny; scale so the short side is
+        // about 720 UI units again.
+        if (Gdx.graphics == null)
+            return 1.0f;
+
+        int shortSide = Math.min(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+        return Math.max(1.0f, shortSide / AndroidConstants.UI_HEIGHT);
+    }
+
+    @Override
+    public void prepareTextField(com.badlogic.gdx.scenes.scene2d.ui.TextField field)
+    {
+        AndroidTextInput.attach(field);
+    }
+
+    @Override
     public boolean greenlightEnabled()
     {
         // The lobby otherwise nags with "Get this game on Steam!" and a link to
@@ -118,13 +138,23 @@ public class AndroidEnvironment extends ClientEnvironment
     /**
      * Data packages ship read-only inside the APK assets. {@code searchPackages()}
      * scans {@code Gdx.files.local("packages")} and {@link ZipContentPackage}
-     * opens packages as real {@link File}s, so any bundled package that is not yet
-     * present in writable app storage is copied there once (on first run).
+     * opens packages as real {@link File}s, so the bundled packages are copied
+     * into writable app storage.
+     *
+     * They are copied again whenever this APK was installed or updated after the
+     * last copy: an update brings new data, and keeping the old copies made new
+     * text and content silently not show up. Each package is written to a
+     * temporary file and renamed, so an interrupted copy never leaves a broken
+     * package behind.
      */
     private void unpackBundledPackages()
     {
         File localPackages = new File(context.getFilesDir(), "packages");
         localPackages.mkdirs();
+
+        File stamp = new File(localPackages, ".bundled-from");
+        String install = installStamp();
+        boolean fresh = !install.equals(readStamp(stamp));
 
         FileHandle assetPackages = Gdx.files.internal("packages");
 
@@ -137,18 +167,33 @@ public class AndroidEnvironment extends ClientEnvironment
 
                 File dst = new File(localPackages, pkg.name());
 
-                if (dst.exists())
+                if (dst.exists() && !fresh)
                     continue;
+
+                File part = new File(localPackages, pkg.name() + ".part");
 
                 try
                 {
-                    FileCopy.copyFile(pkg.read(), dst);
+                    FileCopy.copyFile(pkg.read(), part);
+
+                    if (dst.exists() && !dst.delete())
+                        throw new IOException("Cannot replace " + dst);
+                    if (!part.renameTo(dst))
+                        throw new IOException("Cannot rename " + part + " to " + dst);
                 }
                 catch (IOException e)
                 {
                     e.printStackTrace();
+                    part.delete();
+                    // leave the stamp alone so the next launch tries again
+                    install = null;
                 }
             }
+        }
+
+        if (install != null)
+        {
+            writeStamp(stamp, install);
         }
 
         File mainMenu = ZipContentPackage.packageFile(ClientConstants.Client.MAINMENU_PACKAGE);
@@ -156,6 +201,45 @@ public class AndroidEnvironment extends ClientEnvironment
         if (!mainMenu.exists())
         {
             throw new RuntimeException("Mainmenu package is missing from the APK assets.");
+        }
+    }
+
+    /** Identifies this installation of the APK: changes on every install and update. */
+    private String installStamp()
+    {
+        try
+        {
+            android.content.pm.PackageInfo info = context.getPackageManager()
+                .getPackageInfo(context.getPackageName(), 0);
+            return info.lastUpdateTime + "/" + info.versionName;
+        }
+        catch (android.content.pm.PackageManager.NameNotFoundException e)
+        {
+            return "unknown";
+        }
+    }
+
+    private static String readStamp(File file)
+    {
+        try
+        {
+            return new String(java.nio.file.Files.readAllBytes(file.toPath()), "UTF-8").trim();
+        }
+        catch (IOException e)
+        {
+            return "";
+        }
+    }
+
+    private static void writeStamp(File file, String value)
+    {
+        try
+        {
+            java.nio.file.Files.write(file.toPath(), value.getBytes("UTF-8"));
+        }
+        catch (IOException e)
+        {
+            e.printStackTrace();
         }
     }
 

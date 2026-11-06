@@ -921,8 +921,9 @@ public class MarketMenu extends Menu
 
     private void updateHoveredRow()
     {
-        int x = Gdx.input.getX();
-        int y = Gdx.graphics.getHeight() - Gdx.input.getY();
+        // stage coordinates are UI units, the pointer is in real pixels
+        float x = BrainOutClient.toUIX(Gdx.input.getX());
+        float y = BrainOutClient.getHeight() - BrainOutClient.toUIY(Gdx.input.getY());
 
         Vector2 mousePos = items.stageToLocalCoordinates(new Vector2(x, y));
 

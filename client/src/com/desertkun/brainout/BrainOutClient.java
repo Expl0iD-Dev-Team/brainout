@@ -180,14 +180,37 @@ public class BrainOutClient extends BrainOut implements ApplicationListener
         screenHeight = height;
     }
 
+    /**
+     * Width of the UI and world coordinate space. On a dense phone screen it is
+     * smaller than the real width (see ClientEnvironment.getUIScale), so menus,
+     * the HUD and the world come out the same physical size as on a desktop.
+     * Use Gdx.graphics for real pixels, and toUIX/toUIY for pointer positions.
+     */
     public static int getWidth()
     {
-        return Gdx.graphics.getWidth();
+        return Math.round(Gdx.graphics.getWidth() / getUIScale());
     }
 
     public static int getHeight()
     {
-        return Gdx.graphics.getHeight();
+        return Math.round(Gdx.graphics.getHeight() / getUIScale());
+    }
+
+    public static float getUIScale()
+    {
+        return Env != null ? Env.getUIScale() : 1.0f;
+    }
+
+    /** Pointer x in real pixels (Gdx.input.getX) to UI coordinates. */
+    public static float toUIX(float screenX)
+    {
+        return screenX / getUIScale();
+    }
+
+    /** Pointer y in real pixels (Gdx.input.getY, y down) to UI coordinates (y down). */
+    public static float toUIY(float screenY)
+    {
+        return screenY / getUIScale();
     }
 
     public static int getMin()

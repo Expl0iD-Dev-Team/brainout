@@ -333,8 +333,9 @@ public class IntroMenu extends Menu implements EventReceiver
 
         // Platforms without command-line args (Android) get a manual entry point
         // to type a server address; it reuses the same connect path as the
-        // brainout:// deep link.
-        if (Gdx.app.getType() == Application.ApplicationType.Android)
+        // brainout:// deep link. The online build finds games through the
+        // backend, where connecting to a bare IP would only confuse players.
+        if (Gdx.app.getType() == Application.ApplicationType.Android && !BrainOutClient.getInstance().offline)
         {
             TextButton directConnect = new TextButton(
                     "Direct Connect", BrainOutClient.Skin, "button-small");

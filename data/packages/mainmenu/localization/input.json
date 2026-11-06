@@ -19298,5 +19298,65 @@
         "SR": "",
         "EL": "",
         "PT": "Voc\u00ea ganhou o ultimo conflito em %s"
+    },
+    "MENU_TOUCH_MENU": {
+        "EN": "Menu",
+        "RU": "\u041c\u0435\u043d\u044e"
+    },
+    "MENU_TOUCH_WEAPON": {
+        "EN": "Weapon",
+        "RU": "\u041e\u0440\u0443\u0436\u0438\u0435"
+    },
+    "MENU_TOUCH_RELOAD": {
+        "EN": "Reload",
+        "RU": "\u041f\u0435\u0440\u0435\u0437\u0430\u0440\u044f\u0434\u043a\u0430"
+    },
+    "MENU_TOUCH_CROUCH": {
+        "EN": "Crouch",
+        "RU": "\u041f\u0440\u0438\u0441\u0435\u0441\u0442\u044c"
+    },
+    "MENU_TOUCH_USE": {
+        "EN": "Use",
+        "RU": "\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435"
+    },
+    "MENU_TOUCH_ZOOM": {
+        "EN": "Zoom",
+        "RU": "\u041e\u0431\u0437\u043e\u0440"
+    },
+    "MENU_TOUCH_PLAYERS": {
+        "EN": "Players",
+        "RU": "\u0418\u0433\u0440\u043e\u043a\u0438"
+    },
+    "MENU_TOUCH_CHAT": {
+        "EN": "Chat",
+        "RU": "\u0427\u0430\u0442"
+    },
+    "MENU_TOUCH_MORE": {
+        "EN": "More",
+        "RU": "\u0415\u0449\u0451"
+    },
+    "MENU_TOUCH_DROP": {
+        "EN": "Drop weapon",
+        "RU": "\u0412\u044b\u0431\u0440\u043e\u0441\u0438\u0442\u044c \u043e\u0440\u0443\u0436\u0438\u0435"
+    },
+    "MENU_TOUCH_DROP_AMMO": {
+        "EN": "Drop ammo",
+        "RU": "\u0412\u044b\u0431\u0440\u043e\u0441\u0438\u0442\u044c \u043f\u0430\u0442\u0440\u043e\u043d\u044b"
+    },
+    "MENU_TOUCH_UNLOAD": {
+        "EN": "Unload",
+        "RU": "\u0420\u0430\u0437\u0440\u044f\u0434\u0438\u0442\u044c"
+    },
+    "MENU_TOUCH_FIRE_MODE": {
+        "EN": "Fire mode",
+        "RU": "\u0420\u0435\u0436\u0438\u043c \u043e\u0433\u043d\u044f"
+    },
+    "MENU_TOUCH_TEAM": {
+        "EN": "Change team",
+        "RU": "\u0421\u043c\u0435\u043d\u0438\u0442\u044c \u043a\u043e\u043c\u0430\u043d\u0434\u0443"
+    },
+    "MENU_TOUCH_LAST_SLOT": {
+        "EN": "Last",
+        "RU": "\u041f\u0440\u0435\u0434\u044b\u0434\u0443\u0449\u0435\u0435"
     }
 }

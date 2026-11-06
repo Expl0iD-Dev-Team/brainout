@@ -63,8 +63,9 @@ public class Tooltip extends InputListener
         float x;
         float y;
 
-        float my = BrainOutClient.getHeight() - Gdx.input.getY() + 16;
-        float mx = Gdx.input.getX() + 16;
+        // pointer is in real pixels, the tooltip lives in UI units
+        float my = BrainOutClient.getHeight() - BrainOutClient.toUIY(Gdx.input.getY()) + 16;
+        float mx = BrainOutClient.toUIX(Gdx.input.getX()) + 16;
 
         if (mx > BrainOutClient.getWidth() - actor.getWidth() - 32)
         {

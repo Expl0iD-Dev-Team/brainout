@@ -1,9 +1,12 @@
 package com.desertkun.brainout;
 
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.Actor;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
 import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.badlogic.gdx.scenes.scene2d.Touchable;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
@@ -12,18 +15,28 @@ import com.badlogic.gdx.utils.Align;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import com.desertkun.brainout.controllers.GameController;
 import com.desertkun.brainout.events.GameControllerEvent;
+import com.desertkun.brainout.events.SelectPreviousSlotEvent;
+import com.desertkun.brainout.events.SelectSlotEvent;
 
 /**
- * Twin-stick touch controller.
+ * Touch controls for a match.
  *
  * Two floating sticks driven by raw multi-touch pointers: a touch in the left
  * half of the screen drives the move stick, a touch in the right half drives the
- * aim stick (which also auto-fires past a threshold). A small cluster of action
- * buttons (reload / weapon / use / crouch) lives on a {@link Stage}; only those
- * buttons consume Stage input — the sticks are tracked here directly so move and
- * aim+fire work simultaneously.
+ * aim stick (which also auto-fires past a threshold). Buttons live on a
+ * {@link Stage} and get first refusal on every touch, so move, aim+fire and a
+ * button can all be held at once:
  *
- * Active only in the {@code action} / {@code actionWithNoMouseLocking} modes.
+ *   bottom right  weapon slots 1-4 + last, weapon / reload / crouch / use
+ *   top left      menu (pause), players, chat, zoom, more
+ *   "more"        drop weapon, drop ammo, unload, fire mode, change team
+ *
+ * The Android back button opens the pause menu in a match, like Escape on a
+ * desktop. Active only in the {@code action} / {@code actionWithNoMouseLocking}
+ * modes.
+ *
+ * Everything here is in real screen pixels (touch coordinates and this stage's
+ * ScreenViewport), not the scaled UI units of BrainOutClient.getWidth/getHeight.
  */
 public class AndroidGameController extends GameController
 {
@@ -31,7 +44,7 @@ public class AndroidGameController extends GameController
 
     private Stage ui;
     private Image moveBase, moveKnob, aimBase, aimKnob;
-    private Table buttons;
+    private Table cluster, utility, morePanel;
 
     private int movePointer = NONE;
     private int aimPointer = NONE;
@@ -59,6 +72,8 @@ public class AndroidGameController extends GameController
         // only loaded with the mainmenu package, well after this early init().
     }
 
+    // --------------------------------------------------------------- building
+
     private void ensureUi()
     {
         if (ui != null)
@@ -77,73 +92,142 @@ public class AndroidGameController extends GameController
             ui.addActor(img);
         }
 
-        buttons = buildButtons();
-        ui.addActor(buttons);
+        cluster = buildCluster();
+        utility = buildUtility();
+
+        ui.addActor(cluster);
+        ui.addActor(utility);
     }
 
     private Image skinImage(String drawable)
     {
         Image img = new Image(BrainOutClient.Skin.getDrawable(drawable));
-        img.setTouchable(com.badlogic.gdx.scenes.scene2d.Touchable.disabled);
+        img.setTouchable(Touchable.disabled);
         return img;
     }
 
-    private Table buildButtons()
+    private Table buildCluster()
     {
         Table table = new Table();
         table.setFillParent(true);
         table.align(Align.bottomRight);
 
-        TextButton weapon = textButton("WEAPON");
-        TextButton reload = textButton("RELOAD");
-        TextButton crouch = textButton("CROUCH");
-        TextButton use = textButton("USE");
-
-        weapon.addListener(tap(() -> sendEvent(GameControllerEvent.obtain(GameControllerEvent.Action.switchWeapon))));
-        reload.addListener(tap(() -> sendEvent(GameControllerEvent.obtain(GameControllerEvent.Action.reload))));
-        use.addListener(tap(() -> sendEvent(GameControllerEvent.obtain(GameControllerEvent.Action.activate))));
-        crouch.addListener(tap(() ->
-        {
-            crouching = !crouching;
-            sendEvent(GameControllerEvent.obtain(crouching
-                ? GameControllerEvent.Action.beginSit
-                : GameControllerEvent.Action.endSit));
-        }));
-
         float gap = minDim() * AndroidConstants.Touch.BUTTON_PAD;
         float w = minDim() * AndroidConstants.Touch.BUTTON_W;
         float h = minDim() * AndroidConstants.Touch.BUTTON_H;
+        float slot = minDim() * AndroidConstants.Touch.SLOT_SIZE;
 
-        table.add(weapon).size(w, h).pad(gap);
-        table.add(reload).size(w, h).pad(gap);
+        // Direct weapon slots, as 1-4 and Q on a keyboard (KeyboardController).
+        Table slots = new Table();
+        slots.add(button("1", false, () -> sendEvent(SelectSlotEvent.obtain(0, Constants.Properties.SLOT_PRIMARY))))
+            .size(slot).pad(gap);
+        slots.add(button("2", false, () -> sendEvent(SelectSlotEvent.obtain(1)))).size(slot).pad(gap);
+        slots.add(button("3", false, () ->
+        {
+            if (!sendEvent(SelectSlotEvent.obtain(2)))
+            {
+                sendEvent(SelectSlotEvent.obtain(0, Constants.Properties.SLOT_SECONDARY));
+            }
+        })).size(slot).pad(gap);
+        slots.add(button("4", false, () -> sendEvent(SelectSlotEvent.obtain(3)))).size(slot).pad(gap);
+        slots.add(button(L.get("MENU_TOUCH_LAST_SLOT"), true, () -> sendEvent(SelectPreviousSlotEvent.obtain())))
+            .size(slot * 1.6f, slot).pad(gap);
+
+        table.add(slots).colspan(2).right().row();
+
+        table.add(button(L.get("MENU_TOUCH_WEAPON"), false,
+            () -> action(GameControllerEvent.Action.switchWeapon))).size(w, h).pad(gap);
+        table.add(button(L.get("MENU_TOUCH_RELOAD"), false,
+            () -> action(GameControllerEvent.Action.reload))).size(w, h).pad(gap);
         table.row();
-        table.add(crouch).size(w, h).pad(gap);
-        table.add(use).size(w, h).pad(gap);
+        table.add(button(L.get("MENU_TOUCH_CROUCH"), false, () ->
+        {
+            crouching = !crouching;
+            action(crouching ? GameControllerEvent.Action.beginSit : GameControllerEvent.Action.endSit);
+        })).size(w, h).pad(gap);
+        table.add(button(L.get("MENU_TOUCH_USE"), false,
+            () -> action(GameControllerEvent.Action.activate))).size(w, h).pad(gap);
 
         // Float the cluster above the bottom HUD strip and in from the edge.
-        table.padRight(BrainOutClient.getWidth() * AndroidConstants.Touch.BUTTON_MARGIN_RIGHT);
-        table.padBottom(BrainOutClient.getHeight() * AndroidConstants.Touch.BUTTON_MARGIN_BOTTOM);
+        table.padRight(realWidth() * AndroidConstants.Touch.BUTTON_MARGIN_RIGHT);
+        table.padBottom(realHeight() * AndroidConstants.Touch.BUTTON_MARGIN_BOTTOM);
 
         return table;
     }
 
-    private TextButton textButton(String text)
+    private Table buildUtility()
     {
-        TextButton button = new TextButton(text, BrainOutClient.Skin, "button-small");
-        button.getLabel().setFontScale(AndroidConstants.Touch.BUTTON_FONT_SCALE);
-        return button;
+        Table table = new Table();
+        table.setFillParent(true);
+        table.align(Align.topLeft);
+
+        float gap = minDim() * AndroidConstants.Touch.BUTTON_PAD;
+        float w = minDim() * AndroidConstants.Touch.SMALL_BUTTON_W;
+        float h = minDim() * AndroidConstants.Touch.SMALL_BUTTON_H;
+        float margin = minDim() * AndroidConstants.Touch.UTILITY_MARGIN;
+
+        Table row = new Table();
+        // the pause menu, the same thing Escape / Back opens
+        row.add(button(L.get("MENU_TOUCH_MENU"), true, () -> action(GameControllerEvent.Action.back)))
+            .size(w, h).pad(gap);
+        row.add(button(L.get("MENU_TOUCH_PLAYERS"), true, () -> action(GameControllerEvent.Action.openPlayerList)))
+            .size(w, h).pad(gap);
+        // delayed like the keyboard's chat key, so the menu opens on a clean frame
+        row.add(button(L.get("MENU_TOUCH_CHAT"), true,
+            () -> sendDelayedEvent(GameControllerEvent.obtain(GameControllerEvent.Action.openChat))))
+            .size(w, h).pad(gap);
+        row.add(button(L.get("MENU_TOUCH_ZOOM"), true, () -> action(GameControllerEvent.Action.switchZoom)))
+            .size(w, h).pad(gap);
+        row.add(button(L.get("MENU_TOUCH_MORE"), true, () -> morePanel.setVisible(!morePanel.isVisible())))
+            .size(w, h).pad(gap);
+
+        morePanel = new Table();
+        morePanel.setVisible(false);
+        addMore(morePanel, "MENU_TOUCH_DROP", GameControllerEvent.Action.dropInstrument, w, h, gap);
+        addMore(morePanel, "MENU_TOUCH_DROP_AMMO", GameControllerEvent.Action.dropAmmo, w, h, gap);
+        addMore(morePanel, "MENU_TOUCH_UNLOAD", GameControllerEvent.Action.unload, w, h, gap);
+        addMore(morePanel, "MENU_TOUCH_FIRE_MODE", GameControllerEvent.Action.switchShootMode, w, h, gap);
+        addMore(morePanel, "MENU_TOUCH_TEAM", GameControllerEvent.Action.changeTeam, w, h, gap);
+
+        table.add(row).left().row();
+        table.add(morePanel).left().padLeft(w * 4 + gap * 8);
+
+        table.padTop(margin);
+        table.padLeft(margin);
+
+        return table;
     }
 
-    private ClickListener tap(Runnable action)
+    private void addMore(Table panel, String label, GameControllerEvent.Action action, float w, float h, float gap)
     {
-        return new ClickListener()
+        panel.add(button(L.get(label), true, () ->
+        {
+            morePanel.setVisible(false);
+            action(action);
+        })).size(w * 1.3f, h).pad(gap).row();
+    }
+
+    private TextButton button(String text, boolean small, Runnable onTap)
+    {
+        TextButton button = new TextButton(text, BrainOutClient.Skin, "button-small");
+        button.getLabel().setFontScale(small
+            ? AndroidConstants.Touch.SMALL_FONT_SCALE
+            : AndroidConstants.Touch.BUTTON_FONT_SCALE);
+        button.getLabel().setWrap(true);
+        button.addListener(new ClickListener()
         {
             @Override
             public void clicked(InputEvent event, float x, float y)
             {
-                action.run();
+                onTap.run();
             }
-        };
+        });
+        return button;
+    }
+
+    private void action(GameControllerEvent.Action action)
+    {
+        sendEvent(GameControllerEvent.obtain(action));
     }
 
     // ------------------------------------------------------------------ input
@@ -154,9 +238,19 @@ public class AndroidGameController extends GameController
             || controllerMode == ControllerMode.actionWithNoMouseLocking;
     }
 
+    private static float realWidth()
+    {
+        return Gdx.graphics.getWidth();
+    }
+
+    private static float realHeight()
+    {
+        return Gdx.graphics.getHeight();
+    }
+
     private float minDim()
     {
-        return Math.min(BrainOutClient.getWidth(), BrainOutClient.getHeight());
+        return Math.min(realWidth(), realHeight());
     }
 
     private float radius()
@@ -177,7 +271,13 @@ public class AndroidGameController extends GameController
             return true;
         }
 
-        boolean left = screenX < BrainOutClient.getWidth() / 2f;
+        // a tap anywhere else closes the "more" panel
+        if (morePanel != null && morePanel.isVisible())
+        {
+            morePanel.setVisible(false);
+        }
+
+        boolean left = screenX < realWidth() / 2f;
 
         if (left && movePointer == NONE)
         {
@@ -242,12 +342,20 @@ public class AndroidGameController extends GameController
         return false;
     }
 
+    @Override
+    public boolean isOverControl(int screenX, int screenY)
+    {
+        return hudActive() && ui != null && hitsButton(screenX, screenY);
+    }
+
     private boolean hitsButton(float screenX, float screenY)
     {
         stageTmp.set(screenX, screenY);
         ui.screenToStageCoordinates(stageTmp);
+        // the stick images are untouchable and the layout tables only pass
+        // touches to their children, so any hit is a button
         Actor hit = ui.hit(stageTmp.x, stageTmp.y, true);
-        return hit != null && (hit == buttons || hit.isDescendantOf(buttons));
+        return hit != null;
     }
 
     // ----------------------------------------------------------------- update
@@ -411,8 +519,8 @@ public class AndroidGameController extends GameController
 
     private void syncViewport()
     {
-        int w = BrainOutClient.getWidth();
-        int h = BrainOutClient.getHeight();
+        int w = Gdx.graphics.getWidth();
+        int h = Gdx.graphics.getHeight();
         if (w != lastWidth || h != lastHeight)
         {
             ui.getViewport().update(w, h, true);
@@ -438,10 +546,13 @@ public class AndroidGameController extends GameController
         if (ui == null)
             return;
 
-        buttons.setVisible(active);
+        cluster.setVisible(active);
+        utility.setVisible(active);
 
         if (!active)
         {
+            morePanel.setVisible(false);
+
             // Release anything held so we don't get stuck moving/firing.
             if (movePointer != NONE || aimPointer != NONE)
             {
@@ -465,6 +576,14 @@ public class AndroidGameController extends GameController
     @Override
     public boolean keyDown(int keycode)
     {
+        // Back in a match: the pause menu, as Escape does on a desktop
+        // (menus see Back first and close themselves, see Menu.keyDown).
+        if (keycode == Input.Keys.BACK && hudActive())
+        {
+            action(GameControllerEvent.Action.back);
+            return true;
+        }
+
         return (ui != null && ui.keyDown(keycode)) || super.keyDown(keycode);
     }
 
