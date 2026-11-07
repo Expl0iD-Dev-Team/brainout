@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+*.log
+generated/
+README.md
+docker-compose.yml
+*.bat

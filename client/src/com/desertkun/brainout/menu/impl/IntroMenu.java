@@ -1,5 +1,6 @@
 package com.desertkun.brainout.menu.impl;
 
+import com.badlogic.gdx.Application;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.audio.Music;
 import com.badlogic.gdx.graphics.g2d.Batch;
@@ -9,6 +10,7 @@ import com.badlogic.gdx.scenes.scene2d.actions.Actions;
 import com.badlogic.gdx.scenes.scene2d.actions.RepeatAction;
 import com.badlogic.gdx.scenes.scene2d.ui.Label;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
 import com.badlogic.gdx.utils.Align;
 import com.desertkun.brainout.BrainOutClient;
@@ -328,6 +330,27 @@ public class IntroMenu extends Menu implements EventReceiver
         status.clear();
 
         status.add(clickToContinue).pad(128).row();
+
+        // Platforms without command-line args (Android) get a manual entry point
+        // to type a server address; it reuses the same connect path as the
+        // brainout:// deep link. The online build finds games through the
+        // backend, where connecting to a bare IP would only confuse players.
+        if (Gdx.app.getType() == Application.ApplicationType.Android && !BrainOutClient.getInstance().offline)
+        {
+            TextButton directConnect = new TextButton(
+                    "Direct Connect", BrainOutClient.Skin, "button-small");
+
+            directConnect.addListener(new ClickListener()
+            {
+                @Override
+                public void clicked(InputEvent event, float x, float y)
+                {
+                    pushMenu(new DirectConnectMenu());
+                }
+            });
+
+            status.add(directConnect).pad(16).row();
+        }
 
         canSwitch = true;
 

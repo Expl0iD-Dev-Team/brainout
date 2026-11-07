@@ -702,6 +702,32 @@ public class PlayerClient extends Client
         setProfile(defaultProfile);
     }
 
+    // A brand-new online account has no profile yet. Instead of a blank profile,
+    // grant the authored starter kit (wallet + default loadout) so the menu isn't
+    // empty, and mark it dirty so it persists to the profile service.
+    private void setupStarterProfile()
+    {
+        com.badlogic.gdx.files.FileHandle starterFile = Gdx.files.local("starter-profile.json");
+
+        if (!starterFile.exists())
+        {
+            newProfile();
+            return;
+        }
+
+        JSONObject starterProfile = new JSONObject(starterFile.readString("UTF-8"));
+        setProfile(starterProfile);
+
+        if (profile != null)
+        {
+            // The backend has no profile for this account yet, so the starter kit
+            // must be uploaded in full — otherwise doSave() diffs against it and
+            // persists nothing but the session's changes.
+            profile.resetDiffBaseline();
+            profile.setDirty();
+        }
+    }
+
     private void extend(String token)
     {
         LoginService loginService = LoginService.Get();
@@ -2265,11 +2291,11 @@ public class PlayerClient extends Client
                 }
                 case notFound:
                 {
-                    log("Player has no profile!");
+                    log("Player has no profile! Applying starter profile.");
 
                     BrainOutServer.PostRunnable(() ->
                     {
-                        newProfile();
+                        setupStarterProfile();
                         onlineInitialized(true);
                     });
 

@@ -22,6 +22,7 @@ public class ContentHttpServer
         server.createContext("/map-dimensions", new MapDimensionHandler());
         server.createContext("/add-image", new AddImageExtensionHandler());
         server.createContext("/upload-map", new UploadMapHandler());
+        server.createContext("/status", new StatusHandler());
 
         server.setExecutor(Executors.newFixedThreadPool(4));
 

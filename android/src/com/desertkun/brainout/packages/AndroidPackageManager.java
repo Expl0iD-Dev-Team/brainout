@@ -10,7 +10,7 @@ public class AndroidPackageManager extends ClientPackageManager
     }
 
     @Override
-    public ContentPackage createPackage(String name)
+    public ContentPackage createPackage(String name) throws ContentPackage.ValidationException
     {
         return new AndroidPackage(name);
     }

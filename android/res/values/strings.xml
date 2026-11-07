@@ -3,4 +3,12 @@
 
     <string name="app_name">BrainOut</string>
 
+    <string name="crash_title">The game crashed</string>
+    <string name="crash_message">BrainOut closed because of an error last time. Send the error report to whoever runs your server? It contains the error, the phone model and the game log, nothing else.</string>
+    <string name="crash_send">Send report</string>
+    <string name="crash_skip">No</string>
+
+    <string name="keep_channel">Match connection</string>
+    <string name="keep_text">Keeping your match connected for a few minutes</string>
+
 </resources>

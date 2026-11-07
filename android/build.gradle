@@ -1,46 +1,287 @@
+// Android client module — modernized for Android Gradle Plugin 8.x.
+//
+// This module is only configured when the Android SDK is present (see the
+// guard in settings.gradle). Building it requires:
+//   * JDK 17 (AGP 8 requirement)
+//   * Android SDK with platform 34 and build-tools installed
+//   * a local.properties with sdk.dir=... (or ANDROID_HOME exported)
+//
+plugins {
+    id 'com.android.application'
+}
+
+// Release signing is configured from android/keystore.properties (gitignored)
+// so no secrets live in the repo. See docs/AndroidPort.md for how to generate
+// the keystore. Without it, release builds are produced unsigned.
+def keystorePropertiesFile = file('keystore.properties')
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
-    buildToolsVersion "21.1.2"
-    compileSdkVersion 22
+    namespace 'com.desertkun.brainout.android'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.desertkun.brainout.android'
+        minSdk 24
+        targetSdk 34
+        // Set by CI so every release installs over the previous one.
+        versionCode((project.findProperty('brainoutVersionCode') ?: '1') as int)
+        versionName((project.findProperty('brainoutVersionName') ?: '1.0-dev').toString())
+
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+        }
+
+        // Online support is opt-in so the default APK keeps the offline /
+        // direct-connect behaviour:  -PbrainoutOnline=true
+        // ENV_SERVICE is the Anthill environment service; 10.0.2.2 is how the
+        // Android emulator reaches the host machine's localhost.
+        buildConfigField 'boolean', 'ONLINE_ENABLED',
+                (project.findProperty('brainoutOnline') ?: 'false').toString()
+        buildConfigField 'String', 'ENV_SERVICE',
+                "\"${project.findProperty('brainoutEnvService') ?: 'http://10.0.2.2:9503'}\""
+    }
+
+    buildFeatures {
+        // AGP 8 no longer generates BuildConfig unless asked
+        buildConfig true
+    }
+
     sourceSets {
         main {
             manifest.srcFile 'AndroidManifest.xml'
             java.srcDirs = ['src']
-            aidl.srcDirs = ['src']
-            renderscript.srcDirs = ['src']
-            res.srcDirs = ['res']
+            // build/generated/brainoutRes holds the network security config
+            // (see generateNetworkSecurityConfig below)
+            res.srcDirs = ['res', 'build/generated/brainoutRes']
             assets.srcDirs = ['assets']
+            jniLibs.srcDirs = ['libs']
         }
+    }
 
-        instrumentTest.setRoot('tests')
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            // Reflection-heavy codebase: keep R8 off — string-named content
+            // classes would otherwise be stripped (see docs/AndroidPort.md).
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-project.txt'
+
+            if (keystorePropertiesFile.exists()) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    androidResources {
+        // Bundled data packages are already-compressed .zip; don't let AAPT
+        // recompress them (slower build, no size win) so they stay readable.
+        noCompress 'zip'
+    }
+
+    packagingOptions {
+        // libGDX ships plain .so natives; keep legacy packaging so they load.
+        jniLibs {
+            useLegacyPackaging true
+        }
+        // Several transitive jars (Apache HttpClient, Netty, Kryo deps, ...)
+        // each ship their own META-INF metadata/license files; drop the
+        // duplicates so the resource merge does not fail.
+        resources {
+            excludes += [
+                'META-INF/DEPENDENCIES',
+                'META-INF/LICENSE',
+                'META-INF/LICENSE.txt',
+                'META-INF/LICENSE.md',
+                'META-INF/license.txt',
+                'META-INF/NOTICE',
+                'META-INF/NOTICE.txt',
+                'META-INF/NOTICE.md',
+                'META-INF/notice.txt',
+                'META-INF/INDEX.LIST',
+                'META-INF/*.kotlin_module',
+                'META-INF/io.netty.versions.properties',
+                'META-INF/maven/**',
+                '**/*.proto',
+            ]
+        }
     }
 }
 
-// needed to add JNI shared libraries to APK when compiling on CLI
-tasks.withType(com.android.build.gradle.tasks.PackageApplication) { pkgTask ->
-    pkgTask.jniFolders = new HashSet<File>()
-    pkgTask.jniFolders.add(new File(projectDir, 'libs'))
+configurations { natives }
+
+dependencies {
+    // The online stack (anthill-runtime -> Unirest -> Apache HttpClient) can't run
+    // on Android as published: Android's stripped bootclasspath org.apache.http
+    // shadows any bundled copy, so the full client's API is missing at runtime
+    // (NoSuchFieldError: AllowAllHostnameVerifier.INSTANCE). Drop the originals
+    // here and take them from :anthill-android, which relocates org.apache.http
+    // to shaded.org.apache.http. See docs/AndroidOnline.md.
+    implementation(project(':client')) {
+        exclude group: 'com.github.anthill-platform', module: 'anthill-runtime-java'
+        exclude group: 'com.mashape.unirest', module: 'unirest-java'
+        exclude group: 'org.apache.httpcomponents'
+    }
+    implementation project(path: ':anthill-android', configuration: 'shaded')
+
+    // The core/client modules use the custom libGDX fork
+    // (com.github.desertkun.libgdx:gdx). Exclude the stock gdx core that the
+    // Android backend would otherwise pull in transitively, so only the fork's
+    // gdx classes/resources are on the classpath (avoids duplicate class and
+    // duplicate resource — e.g. default.fragment.glsl — merge failures).
+    implementation("com.badlogicgames.gdx:gdx-backend-android:$gdxVersion") {
+        exclude group: 'com.badlogicgames.gdx', module: 'gdx'
+    }
+    natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-armeabi-v7a"
+    natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-arm64-v8a"
+    natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-x86"
+    natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-x86_64"
+
+    // gdx-controllers Android backend (GamePadManager -> Controllers.initialize()
+    // does Class.forName("...android.AndroidControllers")). Exclude stock gdx so
+    // only the desertkun fork stays on the classpath.
+    implementation("com.badlogicgames.gdx-controllers:gdx-controllers-android:$gdxControllersVersion") {
+        exclude group: 'com.badlogicgames.gdx', module: 'gdx'
+    }
+
+    implementation("com.badlogicgames.gdx:gdx-box2d:$gdxVersion") {
+        exclude group: 'com.badlogicgames.gdx', module: 'gdx'
+    }
+    natives "com.badlogicgames.gdx:gdx-box2d-platform:$gdxVersion:natives-armeabi-v7a"
+    natives "com.badlogicgames.gdx:gdx-box2d-platform:$gdxVersion:natives-arm64-v8a"
+    natives "com.badlogicgames.gdx:gdx-box2d-platform:$gdxVersion:natives-x86"
+    natives "com.badlogicgames.gdx:gdx-box2d-platform:$gdxVersion:natives-x86_64"
+
+    // FreeType font rendering natives (FreeTypeFontGenerator loads libgdx-freetype.so)
+    natives "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-armeabi-v7a"
+    natives "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-arm64-v8a"
+    natives "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-x86"
+    natives "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-x86_64"
 }
 
-// called every time gradle gets executed, takes the native dependencies of
-// the natives configuration, and extracts them to the proper libs/ folders
-// so they get packed with the APK.
-task copyAndroidNatives() { 
-    file("libs/armeabi/").mkdirs();
-    file("libs/armeabi-v7a/").mkdirs();
-    file("libs/x86/").mkdirs();
-
-    configurations.natives.files.each { jar ->
-        def outputDir = null
-        if(jar.name.endsWith("natives-armeabi-v7a.jar")) outputDir = file("libs/armeabi-v7a")
-        if(jar.name.endsWith("natives-armeabi.jar")) outputDir = file("libs/armeabi")
-        if(jar.name.endsWith("natives-x86.jar")) outputDir = file("libs/x86")
-        if(outputDir != null) {
-            copy {
-                from zipTree(jar)
-                into outputDir
-                include "*.so"
+// Extracts the libGDX native .so files out of the `natives` jars into the
+// jniLibs folders so AGP packs them into the APK.
+tasks.register('copyAndroidNatives') {
+    doLast {
+        configurations.natives.files.each { jar ->
+            def outputDir = null
+            if (jar.name.endsWith("natives-armeabi-v7a.jar")) outputDir = file("libs/armeabi-v7a")
+            if (jar.name.endsWith("natives-arm64-v8a.jar")) outputDir = file("libs/arm64-v8a")
+            if (jar.name.endsWith("natives-x86.jar")) outputDir = file("libs/x86")
+            if (jar.name.endsWith("natives-x86_64.jar")) outputDir = file("libs/x86_64")
+            if (outputDir != null) {
+                outputDir.mkdirs()
+                copy {
+                    from zipTree(jar)
+                    into outputDir
+                    include "*.so"
+                }
             }
         }
+    }
+}
+
+// Bundle the com/desertkun *.class files from :core and :client into an asset
+// jar. AndroidReflection scans this jar for @Reflect/@ReflectAlias annotations,
+// because the APK ships its code as a DEX which the class-path scanner cannot
+// read. Only annotation metadata is read from the jar; the classes themselves
+// are loaded by the DEX class loader.
+tasks.register('bundleReflectClasses', Jar) {
+    archiveFileName = 'desertkun-classes.jar'
+    destinationDirectory = file('assets/reflect')
+    from project(':core').sourceSets.main.output
+    from project(':client').sourceSets.main.output
+    include 'com/desertkun/**'
+    includeEmptyDirs = false
+}
+
+// Copies the client data packages into the APK assets; without them the app dies
+// on launch ("Mainmenu package is missing"). A clean clone builds them first, later
+// builds reuse bin/client/packages. Pass -PrebuildData after changing anything in data/.
+def clientPackages = rootProject.file('bin/client/packages')
+
+tasks.register('bundleDataPackages', Sync) {
+    if (project.hasProperty('rebuildData') || !new File(clientPackages, 'mainmenu.zip').exists()) {
+        dependsOn ':make_data_client'
+    }
+    from clientPackages
+    include '*.zip'
+    into file('assets/packages')
+}
+
+// The self-hosted backend has no domain, so its HTTPS certificate is issued by a
+// private CA (deploy/anthill/tls.sh). -PbrainoutServerCa=<ca.crt> makes the APK
+// trust that CA in addition to the system ones. Cleartext stays allowed because
+// game servers are reached directly by IP (kryonet plus HTTP map downloads).
+def serverCa = project.findProperty('brainoutServerCa')?.toString()
+def generatedRes = file('build/generated/brainoutRes')
+
+tasks.register('generateNetworkSecurityConfig') {
+    inputs.property('serverCa', serverCa ?: '')
+    if (serverCa) {
+        inputs.file(serverCa)
+    }
+    outputs.dir(generatedRes)
+
+    doLast {
+        delete generatedRes
+        def anchors = '            <certificates src="system" />'
+
+        if (serverCa) {
+            def ca = file(serverCa)
+            if (!ca.text.contains('-----BEGIN CERTIFICATE-----')) {
+                throw new GradleException("brainoutServerCa is not a PEM certificate: $ca")
+            }
+            copy {
+                from ca
+                into new File(generatedRes, 'raw')
+                rename { 'brainout_server_ca.pem' }
+            }
+            anchors += '\n            <certificates src="@raw/brainout_server_ca" />'
+        }
+
+        def xml = new File(generatedRes, 'xml/network_security_config.xml')
+        xml.parentFile.mkdirs()
+        xml.text = """<?xml version="1.0" encoding="utf-8"?>
+<!-- generated by android/build.gradle (generateNetworkSecurityConfig) -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+${anchors}
+        </trust-anchors>
+    </base-config>
+</network-security-config>
+"""
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name == 'preBuild') {
+        task.dependsOn 'copyAndroidNatives'
+        task.dependsOn 'bundleReflectClasses'
+        task.dependsOn 'bundleDataPackages'
+        task.dependsOn 'generateNetworkSecurityConfig'
     }
 }
 
@@ -53,57 +294,12 @@ task run(type: Exec) {
             properties.load(instr)
         }
         def sdkDir = properties.getProperty('sdk.dir')
-        if (sdkDir) {
-            path = sdkDir
-        } else {
-            path = "$System.env.ANDROID_HOME"
-        }
+        path = sdkDir ?: "$System.env.ANDROID_HOME"
     } else {
         path = "$System.env.ANDROID_HOME"
     }
 
     def adb = path + "/platform-tools/adb"
-    commandLine "$adb", 'shell', 'am', 'start', '-n', 'com.desertkun.brainout.android/com.desertkun.brainout.android.AndroidLauncher'
-}
-
-def findComponent(node, name) {
-    node.component.find { it.@name == name }
-}
-
-def changeOption(node, name, value) {
-    node.find { it.@name == name }.@value = value
-}
-
-def setupAndroidSdk(node) {
-    def newModuleRootManager = findComponent(node, 'NewModuleRootManager')
-    newModuleRootManager.remove(newModuleRootManager.find { it.@type == "inheritedJdk" })
-    def newOrderEntry = new Node(null, 'orderEntry', [type: 'jdk', jdkName: 'Android API 22 Platform', jdkType: 'Android SDK'])
-    newModuleRootManager.children().add(1, newOrderEntry)
-}
-
-// sets up the Android Idea project, using the old Ant based build.
-idea {
-    module {
-        sourceDirs += file("src");
-        scopes = [ COMPILE: [plus:[project.configurations.runtimeClasspath]]]
-
-        iml {
-            withXml {
-                def node = it.asNode()
-
-                setupAndroidSdk node
-
-                def builder = NodeBuilder.newInstance();
-                builder.current = node;
-                builder.component(name: "FacetManager") {
-                    facet(type: "android", name: "Android") {
-                        configuration {
-                            option(name: "UPDATE_PROPERTY_FILES", value:"true")
-                            option(name: "ASSETS_FOLDER_RELATIVE_PATH", value:"/../bin/android")
-                        }
-                    }
-                }
-            }
-        }
-    }
+    commandLine "$adb", 'shell', 'am', 'start', '-n',
+            'com.desertkun.brainout.android/com.desertkun.brainout.android.AndroidLauncher'
 }

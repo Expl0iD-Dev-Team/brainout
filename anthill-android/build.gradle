@@ -1,0 +1,53 @@
+// Shaded anthill-runtime for the Android client.
+//
+// The online stack is anthill-runtime-java -> Unirest -> Apache HttpClient
+// (org.apache.http). Android ships a *stripped* org.apache.http on the
+// bootclasspath which always shadows a bundled copy, so API the full client
+// uses (e.g. AllowAllHostnameVerifier.INSTANCE) is missing at runtime and the
+// first online call dies with NoSuchFieldError. Relocating the package makes
+// the bundled full client the only reachable one.
+//
+// :android consumes the relocated jar via the `shaded` configuration and
+// excludes the un-relocated originals from its own graph.
+
+apply plugin: 'java-library'
+apply plugin: 'com.github.johnrengelman.shadow'
+
+configurations {
+    shaded
+}
+
+dependencies {
+    // mirror core's dependency shape (core swaps the bundled unirest for 1.4.9)
+    implementation("com.github.anthill-platform:anthill-runtime-java:$anthillRuntimeVersion") {
+        exclude group: 'com.mashape.unirest', module: 'unirest-java'
+    }
+    implementation "com.mashape.unirest:unirest-java:1.4.9"
+}
+
+shadowJar {
+    archiveClassifier.set('shaded')
+
+    // the whole Apache HTTP stack must move off org.apache.*
+    relocate 'org.apache.http', 'shaded.org.apache.http'
+    relocate 'org.apache.commons.codec', 'shaded.org.apache.commons.codec'
+    relocate 'org.apache.commons.logging', 'shaded.org.apache.commons.logging'
+
+    // httpclient resolves providers through META-INF/services
+    mergeServiceFiles()
+
+    dependencies {
+        // core declares org.json directly (build.gradle :core), so bundling it here
+        // would duplicate classes in the APK. Java-WebSocket/slf4j only reach the app
+        // through anthill-runtime (which :android excludes), so they stay bundled.
+        exclude(dependency('org.json:json'))
+    }
+
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+}
+
+artifacts {
+    shaded shadowJar
+}

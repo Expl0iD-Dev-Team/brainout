@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <string name="crash_title">Игра аварийно закрылась</string>
+    <string name="crash_message">В прошлый раз BrainOut закрылся из-за ошибки. Отправить отчёт тому, кто держит сервер? В отчёте только ошибка, модель телефона и журнал игры.</string>
+    <string name="crash_send">Отправить отчёт</string>
+    <string name="crash_skip">Нет</string>
+
+    <string name="keep_channel">Связь с матчем</string>
+    <string name="keep_text">Связь с матчем держится ещё несколько минут</string>
+
+</resources>

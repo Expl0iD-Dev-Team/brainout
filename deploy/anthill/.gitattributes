@@ -1,0 +1,6 @@
+# These scripts run inside Linux containers (the controller spawns run.sh, and
+# provision/build run with bash) — keep LF so a Windows checkout can't inject CRLF.
+*.sh text eol=lf
+# sourced by bash and read by python on the server
+*.py text eol=lf
+*.example text eol=lf

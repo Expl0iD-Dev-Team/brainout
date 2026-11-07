@@ -106,7 +106,14 @@ public class RevSoundEffectData extends EffectData implements Runnable
             if (volume > 0)
             {
                 play();
-                updateSound();
+
+                // play() leaves the sound stopped when the platform refuses it
+                // (Android SoundPool out of streams); recursing overflowed the
+                // stack, so retry on the next update instead (see SoundEffectData).
+                if (isPlaying())
+                {
+                    updateSound();
+                }
             }
         }
     }

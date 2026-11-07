@@ -9,7 +9,9 @@ import java.util.regex.Pattern;
 public class LocalizedString 
 {
     private static final Pattern VANILLA_PATTERN = Pattern.compile("^([A-Z0-9_]{3,})$");
-    private static final Pattern VANILLA_COMPLEX_PATTERN = Pattern.compile("\\{([A-Z0-9_]{3,})}");
+    // The trailing brace must be escaped: Android's ICU regex engine rejects a
+    // bare '}' that the desktop JVM tolerates as a literal.
+    private static final Pattern VANILLA_COMPLEX_PATTERN = Pattern.compile("\\{([A-Z0-9_]{3,})\\}");
 
     public String id;
     private boolean complex;
