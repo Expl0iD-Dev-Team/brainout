@@ -196,12 +196,56 @@ public class AndroidEnvironment extends ClientEnvironment
             writeStamp(stamp, install);
         }
 
+        cleanAudioCache(fresh);
+
         File mainMenu = ZipContentPackage.packageFile(ClientConstants.Client.MAINMENU_PACKAGE);
 
         if (!mainMenu.exists())
         {
             throw new RuntimeException("Mainmenu package is missing from the APK assets.");
         }
+    }
+
+    /**
+     * Sounds are extracted from the packages into the cache (AndroidPackage).
+     * Older builds wrote a new temp file on every load and never removed it,
+     * hundreds of megabytes after a few matches; those are deleted in the
+     * background (there can be thousands). After an APK update the sounds
+     * extracted from the old data are deleted too.
+     */
+    private void cleanAudioCache(boolean fresh)
+    {
+        final File cache = context.getCacheDir();
+
+        // synchronously: the game starts extracting into this folder right after
+        if (fresh)
+        {
+            File[] audio = new File(cache, com.desertkun.brainout.packages.AndroidPackage.AUDIO_CACHE).listFiles();
+            if (audio != null)
+            {
+                for (File f : audio)
+                {
+                    //noinspection ResultOfMethodCallIgnored
+                    f.delete();
+                }
+            }
+        }
+
+        Thread cleaner = new Thread(() ->
+        {
+            File[] legacy = cache.listFiles((dir, name) -> name.startsWith("zipFile"));
+            if (legacy != null)
+            {
+                for (File f : legacy)
+                {
+                    //noinspection ResultOfMethodCallIgnored
+                    f.delete();
+                }
+            }
+        }, "audio-cache-cleaner");
+
+        cleaner.setDaemon(true);
+        cleaner.start();
     }
 
     /** Identifies this installation of the APK: changes on every install and update. */

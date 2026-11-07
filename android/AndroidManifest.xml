@@ -6,6 +6,11 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- KeepConnectionService: keeps the match connected for a few minutes
+         while the game is in the background -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
     <!-- The client talks to a user-supplied server over plain TCP/UDP/HTTP
          (default ports 36555/36556/36557). Android 9+ blocks cleartext HTTP by
          default, so allow it for the direct-connect / self-hosted use case. -->
@@ -21,7 +26,12 @@
             android:exported="true"
             android:label="@string/app_name"
             android:screenOrientation="landscape"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenSize">
+            android:launchMode="singleTask"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|screenLayout|uiMode|density|fontScale|locale|layoutDirection|colorMode">
+            <!-- The engine keeps its state in statics, so the activity must never
+                 be recreated for a configuration change (dark theme, font size,
+                 split screen...), and a deep link must reuse the running game
+                 instead of starting a second one (singleTask). -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -37,6 +47,15 @@
                 <data android:scheme="brainout" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name="com.desertkun.brainout.android.KeepConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps a multiplayer game session connected while the player briefly switches apps" />
+        </service>
     </application>
 
 </manifest>

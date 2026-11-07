@@ -11,6 +11,9 @@ import java.io.InputStream;
 
 public class AndroidPackage extends ClientContentPackage
 {
+    /** Folder in the app cache that holds sounds extracted from packages. */
+    public static final String AUDIO_CACHE = "audio";
+
     public AndroidPackage(String name) throws ContentPackage.ValidationException
     {
         super(name);
@@ -30,44 +33,47 @@ public class AndroidPackage extends ClientContentPackage
         @Override
         public FileHandle handle()
         {
-            try
+            // The extracted copy is named after the package, its checksum and
+            // the entry, so the next load (every lobby/match switch) reuses it
+            // instead of writing yet another temp file. An APK update clears
+            // the folder (AndroidEnvironment).
+            File dir = new File(BrainOut.Env.getCacheDir(), AUDIO_CACHE);
+            //noinspection ResultOfMethodCallIgnored
+            dir.mkdirs();
+
+            File f = new File(dir, AndroidPackage.this.getName() + "-" + Long.toHexString(AndroidPackage.this.crc32) + "-"
+                + entryName.replaceAll("[^A-Za-z0-9._-]", "_"));
+
+            if (!f.exists())
             {
-                File cacheDir = BrainOut.Env.getCacheDir();
-
-                String ext = ".temp";
-
-                int lastIndex = entryName.lastIndexOf('.');
-                if (lastIndex > 0) {
-                    ext = entryName.substring(lastIndex);
-                }
-
-                File f;
-                if (cacheDir != null)
-                {
-                    f = File.createTempFile("zipFile" + crc32, ext, cacheDir);
-                }
-                else
-                {
-                    f = File.createTempFile("zipFile" + crc32, ext);
-                }
-
-                f.deleteOnExit();
+                File part = new File(dir, f.getName() + "." + Thread.currentThread().getId() + ".part");
 
                 // The abstract PackageFileHandle has no read(); pull the entry's
                 // bytes through the normal zip handle and copy them out so Android
                 // can play the extracted file.
                 try (InputStream in = AndroidPackage.super.getFile(entryName).read())
                 {
-                    FileCopy.copyFile(in, f);
+                    FileCopy.copyFile(in, part);
+                }
+                catch (IOException e)
+                {
+                    e.printStackTrace();
+                    //noinspection ResultOfMethodCallIgnored
+                    part.delete();
+                    return null;
                 }
 
-                return Gdx.files.absolute(f.getAbsolutePath());
+                if (!part.renameTo(f))
+                {
+                    //noinspection ResultOfMethodCallIgnored
+                    part.delete();
+
+                    if (!f.exists())
+                        return null;
+                }
             }
-            catch (IOException e)
-            {
-                e.printStackTrace();
-                return null;
-            }
+
+            return Gdx.files.absolute(f.getAbsolutePath());
         }
     }
 

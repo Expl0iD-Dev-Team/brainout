@@ -26,6 +26,8 @@ public class AndroidLauncher extends AndroidApplication
 	@Override
 	protected void onCreate (Bundle savedInstanceState)
 	{
+		CrashLog.install(this);
+
 		super.onCreate(savedInstanceState);
 
 		// If the app was opened via a brainout:// deep link, hand the encoded
@@ -54,6 +56,52 @@ public class AndroidLauncher extends AndroidApplication
         app.unsafe = true;
 
 		initialize(app, config);
+
+		CrashLog.offerLastReport(this);
+
+		// Debug builds only: `adb shell run-as <package> touch files/crash-test`
+		// before launch crashes the render thread a few seconds in, to check the
+		// crash report.
+		if (BuildConfig.DEBUG && new java.io.File(getFilesDir(), "crash-test").delete())
+		{
+			new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() ->
+				BrainOutAndroid.crashTest = true, 15000);
+		}
+	}
+
+	@Override
+	protected void onPause()
+	{
+		super.onPause();
+
+		// leaving for another app: keep the connection alive for a while
+		if (!isFinishing())
+			KeepConnectionService.start(this);
+	}
+
+	@Override
+	protected void onResume()
+	{
+		KeepConnectionService.stop(this);
+
+		super.onResume();
+	}
+
+	@Override
+	protected void onDestroy()
+	{
+		KeepConnectionService.stop(this);
+
+		super.onDestroy();
+	}
+
+	@Override
+	protected void onNewIntent(Intent intent)
+	{
+		// singleTask: a brainout:// link opened while the game runs lands here
+		super.onNewIntent(intent);
+		setIntent(intent);
+		handleConnectIntent(intent);
 	}
 
 	private void handleConnectIntent(Intent intent)

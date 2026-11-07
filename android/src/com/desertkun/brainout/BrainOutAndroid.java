@@ -25,9 +25,28 @@ public class BrainOutAndroid extends BrainOutClient
     {
         super.create();
 
+        // BrainOut.init() replaced the default exception handler; keep the
+        // crash report working on top of it
+        com.desertkun.brainout.android.CrashLog.reinstall();
+
         // Back must reach the game (it closes menus, opens the pause menu in a
         // match) instead of finishing the activity and quitting the game.
         Gdx.input.setCatchKey(Input.Keys.BACK, true);
+    }
+
+    /** Set by debug builds to check the crash report, see AndroidLauncher. */
+    public static volatile boolean crashTest;
+
+    @Override
+    public void render()
+    {
+        if (crashTest)
+        {
+            crashTest = false;
+            throw new IllegalStateException("crash test requested by brainout.crashTest");
+        }
+
+        super.render();
     }
 
     @Override
