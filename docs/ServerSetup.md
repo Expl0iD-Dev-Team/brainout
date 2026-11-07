@@ -49,10 +49,11 @@ ss -ltnu | grep -E ':(3306|5672|15672|3000|8086|95[01][0-9]|195[01][0-9]|380[0-2
 cd ~
 git clone https://github.com/Expl0iD-Dev-Team/brainout.git
 cd brainout
-git checkout claude/peaceful-mccarthy-rigm7y
 ```
 
-Серверная сборка — это файл `brainout-server-<версия>.tar.gz` из GitHub Actions. Скачайте архив запуска на странице [Actions](https://github.com/Expl0iD-Dev-Team/brainout/actions/workflows/build.yml) (раздел Artifacts) и распакуйте его. Внутри лежат APK, серверный архив и `SHA256SUMS.txt`. Перенесите серверный архив на сервер, например так:
+Скрипты развёртывания берутся из `master`. Пока изменения не слиты, переключитесь на рабочую ветку: `git checkout claude/peaceful-mccarthy-rigm7y`.
+
+Серверная сборка — это файл `brainout-server-<версия>.tar.gz`. Для выпущенной версии он лежит в релизе вместе с APK ([Release.md](Release.md)). Промежуточные сборки скачиваются на странице [Actions](https://github.com/Expl0iD-Dev-Team/brainout/actions/workflows/build.yml) (раздел Artifacts) и распакуйте его. Внутри лежат APK, серверный архив и `SHA256SUMS.txt`. Перенесите серверный архив на сервер, например так:
 
 ```bash
 scp brainout-server-*.tar.gz <пользователь>@<сервер>:~/
@@ -191,7 +192,8 @@ ssh -L 9500:127.0.0.1:9500 <пользователь>@<сервер>
 - контроллер ищет сервисы по внешним адресам;
 - `collectd` не запускается.
 
+Матчи Quick Play и Free Play, переподключение и сворачивание проверены на эмуляторе на этапах 2–4 ([ReleasePlan.md](ReleasePlan.md)).
+
 **Не проверены:**
 - настоящий роутер с NAT;
-- игра с реального телефона;
-- матчи (Free Play и Quick Play): их серверы добавляются на этапе 2.
+- игра с реального телефона.
