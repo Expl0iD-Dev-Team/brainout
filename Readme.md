@@ -2,6 +2,19 @@
 
 Source code for [Brain / Out](https://brainout.org/), the game.
 
+## Android and a self-hosted server
+
+This fork adds an Android client that plays online against a backend you run
+yourself (a home server is enough). The docs are in Russian:
+
+- [docs/Players.md](docs/Players.md) — for players: installing the APK, controls, sending a crash report.
+- [docs/ServerSetup.md](docs/ServerSetup.md) — running the backend on Ubuntu behind NAT.
+- [docs/Release.md](docs/Release.md) — releasing a version, updates, the test week.
+- [docs/ReleasePlan.md](docs/ReleasePlan.md) — what was done, what was checked, known bugs.
+
+GitHub Actions builds the APK and the server bundle on every push
+(`.github/workflows/build.yml`); a `v*` tag creates a draft release.
+
 ## How To Build From Source
 
 OpenJDK 11 is required.
