@@ -7,6 +7,7 @@
 #
 # Writes brainout-logs-<time>.tar.gz into the current directory.
 set -uo pipefail
+export LC_ALL=C   # free/df/uptime print their headers in the system language otherwise
 . "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
 HOURS="${1:-3}"
@@ -25,7 +26,23 @@ scrub() { sed -E 's/(access_token=)[^ &"]+/\1<cut>/g; s/eyJ[A-Za-z0-9_-]{20,}\.[
     echo "disk:    $(df -h "$REPO" 2>/dev/null | awk 'NR==2 {print $4 " free"}')"
     echo "bundle:  $SERVER_BUNDLE"
     echo "repo:    $(git -C "$REPO" log --oneline -1 2>/dev/null)"
+    echo "load:    $(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null) on $(nproc 2>/dev/null) CPUs"
+    echo "game master up since: $(docker inspect -f '{{.State.StartedAt}}' anthill_game_master 2>/dev/null)"
+    echo
+    echo "top CPU users:"
+    ps -eo pcpu,rss,comm --sort=-pcpu 2>/dev/null | head -8
+    echo
+    echo "containers restarting or recently started:"
+    docker ps --format '{{.Names}}	{{.Status}}' 2>/dev/null | grep -E 'Restarting|seconds|About a minute' || echo "  none"
 } > "$OUT/summary.txt"
+
+# docker logs of a container start when it was (re)created: right after
+# deploy.sh they hold only the last minutes, and the problem is not in them
+started="$(docker inspect -f '{{.State.StartedAt}}' anthill_game_master 2>/dev/null)"
+if [ -n "$started" ] && [ $(( $(date +%s) - $(date -d "$started" +%s 2>/dev/null || echo 0) )) -lt 600 ]; then
+    echo "NOTE: the services were restarted less than 10 minutes ago (deploy.sh?)."
+    echo "      Their logs start there. Reproduce the problem first, then run this again."
+fi
 
 "$HERE/check.sh" > "$OUT/check.txt" 2>&1
 
