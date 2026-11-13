@@ -888,25 +888,46 @@ public class StoreMenu extends Menu
             {
                 String currency = item.getPublicPayload().getJSONObject("offline-price").getString("currency");
 
+                // The original game only priced items in gold bars ("ch") and
+                // its icon is not in this skin; a missing region threw here and
+                // left the whole store empty. Use the icons the user panel shows
+                // for each currency, or the currency name as text.
                 String icon;
 
                 switch (currency)
                 {
-                    case "ch":
+                    case Constants.User.GEARS:
+                        icon = "icon-gears";
+                        break;
+                    case Constants.User.SKILLPOINTS:
+                        icon = "skillpoints-big";
+                        break;
+                    case Constants.User.NUCLEAR_MATERIAL:
+                        icon = "icon-nuclear-material-big";
+                        break;
                     default:
-                    {
                         icon = "icon-small-gold";
-                    }
+                        break;
                 }
 
-                Image image = new Image(BrainOutClient.Skin, icon);
+                com.badlogic.gdx.graphics.g2d.TextureRegion region = BrainOutClient.getRegion(icon);
 
                 buyButton.setText("");
                 buyButton.clearChildren();
 
                 Label l = new Label(String.valueOf((int)totalPrice), BrainOutClient.Skin, "title-small");
                 buyButton.add(l).padRight(4);
-                buyButton.add(image);
+
+                if (region != null)
+                {
+                    Image image = new Image(region);
+                    image.setScaling(com.badlogic.gdx.utils.Scaling.fit);
+                    buyButton.add(image).size(32, 32);
+                }
+                else
+                {
+                    buyButton.add(new Label(currency, BrainOutClient.Skin, "title-small"));
+                }
             }
             else
             {

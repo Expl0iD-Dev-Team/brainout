@@ -45,6 +45,8 @@ public class AndroidGameController extends GameController
     private Stage ui;
     private Image moveBase, moveKnob, aimBase, aimKnob;
     private Table cluster, utility, morePanel;
+    private TextButton playersButton;
+    private boolean inventoryMode;
 
     private int movePointer = NONE;
     private int aimPointer = NONE;
@@ -59,6 +61,7 @@ public class AndroidGameController extends GameController
     private final Vector2 stageTmp = new Vector2();
 
     private boolean firing;
+    private boolean fireHeld;
     private boolean running;
     private boolean crouching;
 
@@ -133,20 +136,29 @@ public class AndroidGameController extends GameController
         slots.add(button(L.get("MENU_TOUCH_LAST_SLOT"), true, () -> sendEvent(SelectPreviousSlotEvent.obtain())))
             .size(slot * 1.6f, slot).pad(gap);
 
-        table.add(slots).colspan(2).right().row();
+        table.add(slots).right().row();
 
-        table.add(button(L.get("MENU_TOUCH_WEAPON"), false,
+        Table grid = new Table();
+        grid.add(button(L.get("MENU_TOUCH_WEAPON"), false,
             () -> action(GameControllerEvent.Action.switchWeapon))).size(w, h).pad(gap);
-        table.add(button(L.get("MENU_TOUCH_RELOAD"), false,
+        grid.add(button(L.get("MENU_TOUCH_RELOAD"), false,
             () -> action(GameControllerEvent.Action.reload))).size(w, h).pad(gap);
-        table.row();
-        table.add(button(L.get("MENU_TOUCH_CROUCH"), false, () ->
+        grid.row();
+        grid.add(button(L.get("MENU_TOUCH_CROUCH"), false, () ->
         {
             crouching = !crouching;
             action(crouching ? GameControllerEvent.Action.beginSit : GameControllerEvent.Action.endSit);
         })).size(w, h).pad(gap);
-        table.add(button(L.get("MENU_TOUCH_USE"), false,
-            () -> action(GameControllerEvent.Action.activate))).size(w, h).pad(gap);
+        grid.add(button(L.get("MENU_TOUCH_USE"), false, this::use)).size(w, h).pad(gap);
+
+        // Hold to fire where the weapon points. The aim stick also fires once
+        // pulled past FIRE_THRESHOLD, but players tap expecting a shot, and the
+        // button lets the right thumb shoot while it is not aiming.
+        Table bottom = new Table();
+        bottom.add(fireButton()).size(w, h * 2 + gap * 2).pad(gap);
+        bottom.add(grid);
+
+        table.add(bottom).right();
 
         // Float the cluster above the bottom HUD strip and in from the edge.
         table.padRight(realWidth() * AndroidConstants.Touch.BUTTON_MARGIN_RIGHT);
@@ -170,8 +182,11 @@ public class AndroidGameController extends GameController
         // the pause menu, the same thing Escape / Back opens
         row.add(button(L.get("MENU_TOUCH_MENU"), true, () -> action(GameControllerEvent.Action.back)))
             .size(w, h).pad(gap);
-        row.add(button(L.get("MENU_TOUCH_PLAYERS"), true, () -> action(GameControllerEvent.Action.openPlayerList)))
-            .size(w, h).pad(gap);
+        // In Free Play the same action opens the inventory with the loot around
+        // the player (Tab on a keyboard); the label follows (updateModeLabels).
+        playersButton = button(L.get("MENU_TOUCH_PLAYERS"), true,
+            () -> action(GameControllerEvent.Action.openPlayerList));
+        row.add(playersButton).size(w, h).pad(gap);
         // delayed like the keyboard's chat key, so the menu opens on a clean frame
         row.add(button(L.get("MENU_TOUCH_CHAT"), true,
             () -> sendDelayedEvent(GameControllerEvent.obtain(GameControllerEvent.Action.openChat))))
@@ -223,6 +238,74 @@ public class AndroidGameController extends GameController
             }
         });
         return button;
+    }
+
+    private TextButton fireButton()
+    {
+        TextButton button = new TextButton(L.get("MENU_TOUCH_FIRE"), BrainOutClient.Skin, "button-small");
+        button.getLabel().setFontScale(AndroidConstants.Touch.BUTTON_FONT_SCALE);
+        button.addListener(new com.badlogic.gdx.scenes.scene2d.InputListener()
+        {
+            @Override
+            public boolean touchDown(InputEvent event, float x, float y, int pointer, int b)
+            {
+                fireHeld = true;
+                sendEvent(GameControllerEvent.obtain(GameControllerEvent.Action.beginLaunch, 0));
+                return true;
+            }
+
+            @Override
+            public void touchUp(InputEvent event, float x, float y, int pointer, int b)
+            {
+                releaseFireButton();
+            }
+        });
+        return button;
+    }
+
+    private void releaseFireButton()
+    {
+        if (fireHeld)
+        {
+            fireHeld = false;
+            // the aim stick may still be holding the trigger
+            if (!firing)
+                sendEvent(GameControllerEvent.obtain(GameControllerEvent.Action.endLaunch, 0));
+        }
+    }
+
+    /** True where the player-list action opens the inventory and loot (Free Play). */
+    private static boolean exchangeInsteadOfPlayers()
+    {
+        return BrainOutClient.ClientController != null
+            && !BrainOutClient.ClientController.canSeePlayerList()
+            && BrainOutClient.ClientController.canSeeExchangeMenu();
+    }
+
+    private void updateModeLabels()
+    {
+        boolean inventory = exchangeInsteadOfPlayers();
+        if (inventory == inventoryMode || playersButton == null)
+            return;
+
+        inventoryMode = inventory;
+        playersButton.setText(L.get(inventory ? "MENU_TOUCH_INVENTORY" : "MENU_TOUCH_PLAYERS"));
+    }
+
+    /**
+     * Doors, ladders, safes and the like react to "use" (E on a keyboard).
+     * Crates, cupboards and items on the ground do not: on a desktop they are
+     * looted from the inventory screen, and players on a phone press "use" at a
+     * crate and see nothing happen. So when there is nothing to activate, "use"
+     * opens the inventory, which lists the loot within reach.
+     */
+    private void use()
+    {
+        if (sendEvent(GameControllerEvent.obtain(GameControllerEvent.Action.activate)))
+            return;
+
+        if (exchangeInsteadOfPlayers())
+            action(GameControllerEvent.Action.openPlayerList);
     }
 
     private void action(GameControllerEvent.Action action)
@@ -367,6 +450,8 @@ public class AndroidGameController extends GameController
             return;
 
         syncViewport();
+        // the game mode can arrive after the HUD was shown
+        updateModeLabels();
         ui.act(dt);
 
         if (!hudActive())
@@ -436,7 +521,8 @@ public class AndroidGameController extends GameController
         else if (!wantFire && firing)
         {
             firing = false;
-            sendEvent(GameControllerEvent.obtain(GameControllerEvent.Action.endLaunch, 0));
+            if (!fireHeld)
+                sendEvent(GameControllerEvent.obtain(GameControllerEvent.Action.endLaunch, 0));
         }
     }
 
@@ -455,7 +541,8 @@ public class AndroidGameController extends GameController
         if (firing)
         {
             firing = false;
-            sendEvent(GameControllerEvent.obtain(GameControllerEvent.Action.endLaunch, 0));
+            if (!fireHeld)
+                sendEvent(GameControllerEvent.obtain(GameControllerEvent.Action.endLaunch, 0));
         }
     }
 
@@ -547,6 +634,9 @@ public class AndroidGameController extends GameController
             return;
 
         cluster.setVisible(active);
+
+        if (active)
+            updateModeLabels();
         utility.setVisible(active);
 
         if (!active)
@@ -559,6 +649,7 @@ public class AndroidGameController extends GameController
                 stopMoving();
                 stopFiring();
             }
+            releaseFireButton();
             movePointer = NONE;
             aimPointer = NONE;
             hideStick(moveBase, moveKnob);

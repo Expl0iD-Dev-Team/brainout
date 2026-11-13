@@ -90,6 +90,15 @@ else
     ok "player scopes have no admin scopes"
 fi
 
+echo "game data:"
+market="$(docker exec -i "$MYSQL_CONTAINER" mysql -uroot -p"$MYSQL_ROOT_PW" -N -e \
+    "SELECT COUNT(*) FROM markets WHERE gamespace_id=$GAMESPACE_ID AND market_name='freeplay'" dev_market 2>/dev/null)"
+if [ "$market" = "1" ]; then
+    ok "market 'freeplay' exists (Free Play stash)"
+else
+    bad "market 'freeplay' is missing: the stash will not open; re-run deploy.sh"
+fi
+
 echo "listening on all interfaces (should be only nginx, ssh and game rooms):"
 if command -v ss >/dev/null; then
     ss -Hltnu 2>/dev/null | awk '{print $1, $5}' \

@@ -214,6 +214,16 @@ cp "$STATE_DIR/service-rewrite.json" "$STAGE/service-rewrite.json"
 
 bash "$HERE/seed-economy.sh"
 
+# The Free Play stash and item storage live in the market service, in a market
+# named "freeplay" (client and server both ask for it). The service never
+# creates markets itself; without this one every stash request is a 404 and the
+# stash shows "An error has occurred". Its settings are not used.
+myq dev_market <<SQL
+INSERT IGNORE INTO markets (gamespace_id, market_name, market_settings)
+VALUES ($GAMESPACE_ID, 'freeplay', '{}');
+SQL
+echo "market: freeplay"
+
 # ----- 9. restart what read the changed config ------------------------------
 step "9. restart services"
 # Discovery reads discovery-services.json only for services it doesn't know yet

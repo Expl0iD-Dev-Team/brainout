@@ -6,6 +6,8 @@
     <string name="crash_send">Отправить отчёт</string>
     <string name="crash_skip">Нет</string>
 
+    <string name="log_send">Отправить журнал игры</string>
+
     <string name="keep_channel">Связь с матчем</string>
     <string name="keep_text">Связь с матчем держится ещё несколько минут</string>
 

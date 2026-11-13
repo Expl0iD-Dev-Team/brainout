@@ -48,6 +48,13 @@
             </intent-filter>
         </activity>
 
+        <!-- serves crash reports and logs to the app picked in the share sheet -->
+        <provider
+            android:name="com.desertkun.brainout.android.LogFileProvider"
+            android:authorities="com.desertkun.brainout.android.logs"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <service
             android:name="com.desertkun.brainout.android.KeepConnectionService"
             android:exported="false"

@@ -81,6 +81,12 @@ public abstract class ClientEnvironment extends Environment
      */
     public float getUIScale() { return 1.0f; }
 
+    /** Whether the platform can hand the game log to another app (see shareLog). */
+    public boolean canShareLog() { return false; }
+
+    /** Hands the recent game log to another app, so a player can send it on. */
+    public void shareLog() {}
+
     /** Called when a text field gets keyboard focus; platforms may swap its on-screen keyboard. */
     public void prepareTextField(com.badlogic.gdx.scenes.scene2d.ui.TextField field) {}
 

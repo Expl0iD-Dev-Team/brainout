@@ -32,7 +32,7 @@ import java.util.Locale;
 public final class CrashLog
 {
     private static final String FILE = "last-crash.txt";
-    private static final int LOG_LINES = 200;
+    private static final int LOG_LINES = 2000;
 
     private static Context appContext;
 
@@ -95,12 +95,7 @@ public final class CrashLog
 
         try (Writer out = new OutputStreamWriter(new FileOutputStream(part), StandardCharsets.UTF_8))
         {
-            out.write("BrainOut crash report\n");
-            out.write("time: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(new Date()) + "\n");
-            out.write("app: " + BuildConfig.VERSION_NAME + " (" + BuildConfig.VERSION_CODE + ")"
-                + (BuildConfig.ONLINE_ENABLED ? " online " + BuildConfig.ENV_SERVICE : " offline") + "\n");
-            out.write("device: " + Build.MANUFACTURER + " " + Build.MODEL
-                + ", Android " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")\n");
+            out.write(header("BrainOut crash report"));
             out.write("thread: " + thread.getName() + "\n\n");
             out.write(trace.toString());
             out.write("\n--- game log (last " + LOG_LINES + " lines) ---\n");
@@ -112,6 +107,16 @@ public final class CrashLog
         dst.delete();
         //noinspection ResultOfMethodCallIgnored
         part.renameTo(dst);
+    }
+
+    private static String header(String title)
+    {
+        return title + "\n"
+            + "time: " + new SimpleDateFormat("yyyy-MM-dd HH:mm:ss Z", Locale.US).format(new Date()) + "\n"
+            + "app: " + BuildConfig.VERSION_NAME + " (" + BuildConfig.VERSION_CODE + ")"
+            + (BuildConfig.ONLINE_ENABLED ? " online " + BuildConfig.ENV_SERVICE : " offline") + "\n"
+            + "device: " + Build.MANUFACTURER + " " + Build.MODEL
+            + ", Android " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")\n";
     }
 
     /** This process's own logcat lines; an app may read its own log. */
@@ -178,23 +183,91 @@ public final class CrashLog
             .setTitle(R.string.crash_title)
             .setMessage(R.string.crash_message)
             .setPositiveButton(R.string.crash_send, (dialog, which) ->
-            {
-                Intent send = new Intent(Intent.ACTION_SEND);
-                send.setType("text/plain");
-                send.putExtra(Intent.EXTRA_SUBJECT, "BrainOut crash report");
-                send.putExtra(Intent.EXTRA_TEXT, text);
-
-                try
-                {
-                    activity.startActivity(Intent.createChooser(send,
-                        activity.getString(R.string.crash_send)));
-                }
-                catch (android.content.ActivityNotFoundException ignored)
-                {
-                    // nothing on the phone can share text; drop the report
-                }
-            })
+                share(activity, "brainout-crash", text, activity.getString(R.string.crash_send)))
             .setNegativeButton(R.string.crash_skip, null)
             .show();
+    }
+
+    /**
+     * The "send log" button of the pause menu: the recent game log goes to an
+     * app the player picks, so problems that are not crashes (a hang, a
+     * button that does nothing) can be looked into too.
+     */
+    public static void shareCurrentLog(final Context context)
+    {
+        if (!(context instanceof Activity))
+            return;
+
+        final Activity activity = (Activity) context;
+
+        new Thread(() ->
+        {
+            final String text = header("BrainOut log")
+                + "\n--- game log (last " + LOG_LINES + " lines) ---\n"
+                + recentLog();
+
+            activity.runOnUiThread(() ->
+                share(activity, "brainout-log", text, activity.getString(R.string.log_send)));
+        }, "share-log").start();
+    }
+
+    /** Writes the text to cache/logs and opens the share sheet with it attached. */
+    private static void share(Activity activity, String name, String text, String title)
+    {
+        File dir = LogFileProvider.dir(activity);
+
+        File[] old = dir.listFiles();
+        if (old != null)
+        {
+            for (File f : old)
+            {
+                //noinspection ResultOfMethodCallIgnored
+                f.delete();
+            }
+        }
+
+        File file = new File(dir, name + "-"
+            + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date()) + ".txt");
+
+        try
+        {
+            Files.write(file.toPath(), text.getBytes(StandardCharsets.UTF_8));
+        }
+        catch (IOException e)
+        {
+            e.printStackTrace();
+            return;
+        }
+
+        android.net.Uri uri = LogFileProvider.uriFor(activity, file);
+
+        // the first lines (version, device and, for a crash, the error) also go
+        // as the message text, in case the receiving app drops the attachment
+        int cut = 0;
+        for (int i = 0, n = 0; i < text.length() && n < 12; i++)
+        {
+            if (text.charAt(i) == '\n')
+            {
+                n++;
+                cut = i;
+            }
+        }
+
+        Intent send = new Intent(Intent.ACTION_SEND);
+        send.setType("text/plain");
+        send.putExtra(Intent.EXTRA_SUBJECT, file.getName());
+        send.putExtra(Intent.EXTRA_TEXT, text.substring(0, cut));
+        send.putExtra(Intent.EXTRA_STREAM, uri);
+        send.setClipData(android.content.ClipData.newRawUri(file.getName(), uri));
+        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        try
+        {
+            activity.startActivity(Intent.createChooser(send, title));
+        }
+        catch (android.content.ActivityNotFoundException ignored)
+        {
+            // nothing on the phone can receive a file
+        }
     }
 }

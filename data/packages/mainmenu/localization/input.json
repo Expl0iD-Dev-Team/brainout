@@ -19358,5 +19358,17 @@
     "MENU_TOUCH_LAST_SLOT": {
         "EN": "Last",
         "RU": "\u041f\u0440\u0435\u0434\u044b\u0434\u0443\u0449\u0435\u0435"
+    },
+    "MENU_SEND_LOG": {
+        "EN": "Send log",
+        "RU": "\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c \u0436\u0443\u0440\u043d\u0430\u043b"
+    },
+    "MENU_TOUCH_FIRE": {
+        "EN": "Fire",
+        "RU": "\u041e\u0433\u043e\u043d\u044c"
+    },
+    "MENU_TOUCH_INVENTORY": {
+        "EN": "Inventory",
+        "RU": "\u0418\u043d\u0432\u0435\u043d\u0442\u0430\u0440\u044c"
     }
 }

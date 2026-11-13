@@ -67,6 +67,18 @@ public class AndroidEnvironment extends ClientEnvironment
     }
 
     @Override
+    public boolean canShareLog()
+    {
+        return true;
+    }
+
+    @Override
+    public void shareLog()
+    {
+        com.desertkun.brainout.android.CrashLog.shareCurrentLog(context);
+    }
+
+    @Override
     public void prepareTextField(com.badlogic.gdx.scenes.scene2d.ui.TextField field)
     {
         AndroidTextInput.attach(field);
