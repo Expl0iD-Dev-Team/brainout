@@ -94,7 +94,7 @@ public class Constants
         public static final int DEFAULT_HTTP_PORT = 36557;
         public static final int TIME_OUT = 2500;
 
-        public static final int RECONNECT_TIME_OUT = 15;
+        public static final int RECONNECT_TIME_OUT = 45; // seconds; a phone switching Wi-Fi to mobile data needs 10-20
 
         public static final String[] DISCOVER = new String[]
         {

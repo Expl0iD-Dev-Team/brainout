@@ -1,10 +1,12 @@
 package com.desertkun.brainout.menu.impl.realestate;
 
+import com.badlogic.gdx.Application;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
+import com.badlogic.gdx.utils.TimeUtils;
 import com.desertkun.brainout.BrainOutClient;
 import com.desertkun.brainout.ClientConstants;
 import com.desertkun.brainout.Constants;
@@ -67,8 +69,9 @@ public class RealEstateActionMenu extends Menu
 
     private Vector2 convertMousePosition(Map map, float screenX, float screenY)
     {
-        Map.GetMouseScaleWatcher(screenX - BrainOutClient.getWidth() / 2f,
-                - (screenY - BrainOutClient.getHeight() / 2f), mousePosition);
+        // screenX/Y are real pixels; the world camera uses UI units (see BrainOutClient.getUIScale)
+        Map.GetMouseScaleWatcher(BrainOutClient.toUIX(screenX) - BrainOutClient.getWidth() / 2f,
+                - (BrainOutClient.toUIY(screenY) - BrainOutClient.getHeight() / 2f), mousePosition);
 
         mousePosition.x = MathUtils.clamp(mousePosition.x, 0, map.getWidth());
         mousePosition.y = MathUtils.clamp(mousePosition.y, 0, map.getHeight());
@@ -147,50 +150,104 @@ public class RealEstateActionMenu extends Menu
     private ActiveData getHoverItem(int screenX, int screenY)
     {
         FreePlayMap map = getMap();
+        if (map == null)
+            return null;
+
         return checkBlock(map, convertMousePosition(map, screenX, screenY));
+    }
+
+    // A touch screen has no hover and no right button. There a short tap that
+    // barely moves picks the container under the finger and opens it, the way a
+    // right click on a hovered one does; a longer touch stays a stick gesture.
+    private static final long TAP_MAX_MS = 300;
+    private static final float TAP_MAX_MOVE = 0.03f; // fraction of the smaller screen side
+
+    private int tapPointer = -1;
+    private long tapTime;
+    private int tapX, tapY;
+
+    private static boolean isTouchScreen()
+    {
+        return Gdx.app.getType() == Application.ApplicationType.Android;
     }
 
     @Override
     public boolean touchDown(int screenX, int screenY, int pointer, int button)
     {
-        if (button == Input.Buttons.RIGHT)
+        if (isTouchScreen())
         {
-            if (hoveredItem != null)
+            if (tapPointer == -1 &&
+                !BrainOutClient.Env.getGameController().isOverControl(screenX, screenY))
             {
-                CSGame csGame = BrainOutClient.ClientController.getState(CSGame.class);
-                if (csGame != null)
-                {
-                    PlayerData playerData = csGame.getPlayerData();
-                    if (playerData != null)
-                    {
-                        ActiveProgressVisualComponentData progress = playerData.getComponent(ActiveProgressVisualComponentData.class);
-
-                        if (progress != null && progress.isActive())
-                        {
-                            return false;
-                        }
-                    }
-                }
-
-                SpriteWithBlocksComponentData spi = hoveredItem.getComponent(SpriteWithBlocksComponentData.class);
-
-                if (spi != null && Map.Get(hoveredItem.getDimension(), FreePlayMap.class) != null)
-                {
-                    RealEstateItemContainerComponent rsnic =
-                        hoveredItem.getCreator().getComponent(RealEstateItemContainerComponent.class);
-                    if (rsnic != null)
-                    {
-                        BrainOutClient.getInstance().topState().topMenu().pushMenu(
-                            new RealEstateItemExchangeInventoryMenu(
-                                BrainOutClient.ClientController.getState(CSGame.class).getPlayerData(),
-                                hoveredItem
-                        ));
-                    }
-                }
+                tapPointer = pointer;
+                tapTime = TimeUtils.millis();
+                tapX = screenX;
+                tapY = screenY;
             }
+        }
+        else if (button == Input.Buttons.RIGHT)
+        {
+            openHoveredContainer();
         }
 
         return super.touchDown(screenX, screenY, pointer, button);
+    }
+
+    @Override
+    public boolean touchUp(int screenX, int screenY, int pointer, int button)
+    {
+        if (isTouchScreen() && pointer == tapPointer)
+        {
+            tapPointer = -1;
+
+            float maxMove = TAP_MAX_MOVE * Math.min(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+
+            if (TimeUtils.timeSinceMillis(tapTime) <= TAP_MAX_MS &&
+                Vector2.dst(tapX, tapY, screenX, screenY) <= maxMove)
+            {
+                hoveredItem = getHoverItem(screenX, screenY);
+                openHoveredContainer();
+            }
+        }
+
+        return super.touchUp(screenX, screenY, pointer, button);
+    }
+
+    private void openHoveredContainer()
+    {
+        if (hoveredItem != null)
+        {
+            CSGame csGame = BrainOutClient.ClientController.getState(CSGame.class);
+            if (csGame != null)
+            {
+                PlayerData playerData = csGame.getPlayerData();
+                if (playerData != null)
+                {
+                    ActiveProgressVisualComponentData progress = playerData.getComponent(ActiveProgressVisualComponentData.class);
+
+                    if (progress != null && progress.isActive())
+                    {
+                        return;
+                    }
+                }
+            }
+
+            SpriteWithBlocksComponentData spi = hoveredItem.getComponent(SpriteWithBlocksComponentData.class);
+
+            if (spi != null && Map.Get(hoveredItem.getDimension(), FreePlayMap.class) != null)
+            {
+                RealEstateItemContainerComponent rsnic =
+                    hoveredItem.getCreator().getComponent(RealEstateItemContainerComponent.class);
+                if (rsnic != null)
+                {
+                    BrainOutClient.getInstance().topState().topMenu().pushMenu(
+                        new RealEstateItemExchangeInventoryMenu(
+                            BrainOutClient.ClientController.getState(CSGame.class).getPlayerData(),
+                            hoveredItem
+                    ));
+                }
+            }
+        }
     }
 
     @Override

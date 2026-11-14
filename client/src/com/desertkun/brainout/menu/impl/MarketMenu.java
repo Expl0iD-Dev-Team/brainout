@@ -391,11 +391,18 @@ public class MarketMenu extends Menu
             return null;
         }
 
-        String[] names = JSONObject.getNames(filter);
+        // JSONObject.getNames() isn't in Android's built-in org.json; names() is
+        JSONArray keys = filter.names();
 
-        if (names == null)
+        if (keys == null)
         {
             return null;
+        }
+
+        String[] names = new String[keys.length()];
+        for (int i = 0; i < names.length; i++)
+        {
+            names[i] = keys.getString(i);
         }
 
         JSONObject o = new JSONObject(filter, names);
@@ -914,8 +921,9 @@ public class MarketMenu extends Menu
 
     private void updateHoveredRow()
     {
-        int x = Gdx.input.getX();
-        int y = Gdx.graphics.getHeight() - Gdx.input.getY();
+        // stage coordinates are UI units, the pointer is in real pixels
+        float x = BrainOutClient.toUIX(Gdx.input.getX());
+        float y = BrainOutClient.getHeight() - BrainOutClient.toUIY(Gdx.input.getY());
 
         Vector2 mousePos = items.stageToLocalCoordinates(new Vector2(x, y));
 

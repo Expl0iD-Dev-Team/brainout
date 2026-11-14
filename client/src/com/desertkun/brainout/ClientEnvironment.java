@@ -75,6 +75,21 @@ public abstract class ClientEnvironment extends Environment
 
     public boolean greenlightEnabled() { return true; }
 
+    /**
+     * Real pixels per UI unit. 1 on desktops; phones raise it so the interface
+     * isn't laid out in tiny physical sizes (BrainOutClient.getWidth/getHeight).
+     */
+    public float getUIScale() { return 1.0f; }
+
+    /** Whether the platform can hand the game log to another app (see shareLog). */
+    public boolean canShareLog() { return false; }
+
+    /** Hands the recent game log to another app, so a player can send it on. */
+    public void shareLog() {}
+
+    /** Called when a text field gets keyboard focus; platforms may swap its on-screen keyboard. */
+    public void prepareTextField(com.badlogic.gdx.scenes.scene2d.ui.TextField field) {}
+
     public boolean enableNSFW()
     {
         return true;

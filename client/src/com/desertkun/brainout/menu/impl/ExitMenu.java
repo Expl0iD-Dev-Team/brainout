@@ -55,6 +55,11 @@ public class ExitMenu extends Menu
         {
             addButton(L.get("MENU_ENTER_PROMO_BTN"), this::promo);
         }
+        if (BrainOutClient.Env.canShareLog())
+        {
+            // phones: the only way a player can get the log to whoever runs the server
+            addButton(L.get("MENU_SEND_LOG"), () -> BrainOutClient.Env.shareLog());
+        }
         addButton(L.get("MENU_EXIT"), this::exit);
 
         String currentRoom = BrainOutClient.Env.getCurrentRoom();

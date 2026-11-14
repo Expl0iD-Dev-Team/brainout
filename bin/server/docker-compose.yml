@@ -1,0 +1,12 @@
+services:
+  brainout-server:
+    build: .
+    image: brainout-server:offline
+    container_name: brainout-server
+    restart: unless-stopped
+    ports:
+      - "36555:36555/tcp"   # KryoNet TCP
+      - "36556:36556/udp"   # KryoNet UDP
+      - "36557:36557/tcp"   # HTTP
+    # To run a different mode/map, override the command, e.g.:
+    # command: ["--mode", "lobby", "--settings", "server-lobby.json", "--offline"]

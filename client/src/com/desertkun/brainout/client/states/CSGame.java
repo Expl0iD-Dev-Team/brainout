@@ -121,7 +121,11 @@ public class CSGame extends ControllerState
     @SuppressWarnings("unused")
     public boolean received(PingMsg pingMsg)
     {
-        Gdx.app.postRunnable(() -> getController().sendUDP(new PongMsg(pingMsg, System.nanoTime())));
+        // Answered right here on the network thread, not on the render thread:
+        // a phone stops rendering while the game is in the background, and the
+        // server kicks (and punishes as a deserter) a player who sends no pong
+        // for 30 seconds. kryonet's sendUDP is thread-safe.
+        getController().sendUDP(new PongMsg(pingMsg, System.nanoTime()));
 
         return true;
     }

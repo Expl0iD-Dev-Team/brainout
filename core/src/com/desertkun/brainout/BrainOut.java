@@ -55,7 +55,7 @@ public abstract class BrainOut
         loop = true;
 
         Env = env;
-        R = new Reflection();
+        R = env.getReflection();
         R.init();
 
         Kryo = new Kryo()

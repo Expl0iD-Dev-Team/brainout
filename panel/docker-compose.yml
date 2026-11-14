@@ -1,0 +1,36 @@
+# Run the control panel as a container. The panel manages the GAME container
+# itself (creates/recreates `brainout-server`), so the game server is NOT a
+# service here — only the panel is.
+#
+#   cp .env.example .env   # set PANEL_ADMIN_PASSWORD / PANEL_SECRET_KEY
+#   docker compose up --build -d
+#
+# Put this behind a TLS reverse proxy (Caddy/nginx) in production — the panel
+# holds the Docker socket (root-equivalent) and must not be exposed unauthenticated.
+services:
+  panel:
+    build: .
+    image: brainout-panel
+    container_name: brainout-panel
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      PANEL_ADMIN_PASSWORD: "${PANEL_ADMIN_PASSWORD:?set PANEL_ADMIN_PASSWORD in .env}"
+      PANEL_SECRET_KEY: "${PANEL_SECRET_KEY:?set PANEL_SECRET_KEY in .env}"
+      PANEL_GAME_CONTAINER: "brainout-server"
+      PANEL_GAME_IMAGE: "brainout-server:offline"
+      PANEL_SERVER_DIR: "/srv/server"
+      PANEL_GENERATED_DIR: "${PANEL_GENERATED_HOST:-/srv/brainout/generated}"
+      # live status: reach the game server's published http port via the host
+      PANEL_STATUS_URL: "http://host.docker.internal:36557"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # manage the game container
+      - /var/run/docker.sock:/var/run/docker.sock
+      # game config + maps for the catalog (read-only)
+      - ../bin/server:/srv/server:ro
+      # generated one-map sets — SAME host path inside & out, so the path the
+      # panel writes is valid when bind-mounted into the game container
+      - "${PANEL_GENERATED_HOST:-/srv/brainout/generated}:${PANEL_GENERATED_HOST:-/srv/brainout/generated}"

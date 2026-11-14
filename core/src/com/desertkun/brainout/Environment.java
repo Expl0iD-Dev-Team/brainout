@@ -3,6 +3,7 @@ package com.desertkun.brainout;
 import com.badlogic.gdx.utils.ObjectMap;
 import com.desertkun.brainout.online.NetworkClient;
 import com.desertkun.brainout.online.NetworkConnectionListener;
+import com.desertkun.brainout.reflection.Reflection;
 import com.esotericsoftware.kryo.Kryo;
 
 import java.io.File;
@@ -61,6 +62,16 @@ public abstract class Environment
     }
 
     public abstract NetworkClient newNetworkClient(Kryo kryo, NetworkConnectionListener listener);
+
+    /**
+     * Creates the reflection registry. Platforms whose code is not reachable as
+     * {@code .class} files on the JVM class path (Android) override this to supply
+     * a {@link Reflection} that scans a bundled class jar instead.
+     */
+    public Reflection getReflection()
+    {
+        return new Reflection();
+    }
 
     public String[] getArgs()
     {

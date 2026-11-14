@@ -118,6 +118,21 @@ public class ClientProfile extends UserProfile
         setDirty(false);
     }
 
+    /**
+     * Treats the current state as brand new by clearing the diff baseline.
+     *
+     * doSave() uploads only JSONDiff.Diff(profile, ext), where `profile` is what
+     * the backend is assumed to already hold. When the profile was seeded locally
+     * (the starter profile) the backend holds nothing, so diffing against it would
+     * drop the whole starter kit — stats, level, loadout — and persist only what
+     * changed during the session. Clearing the baseline makes the next save upload
+     * the profile in full.
+     */
+    public void resetDiffBaseline()
+    {
+        this.profile = new JSONObject();
+    }
+
     public void setDirty(boolean sendProfile)
     {
         this.dirty = true;

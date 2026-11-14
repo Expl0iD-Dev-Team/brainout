@@ -61,4 +61,10 @@ public abstract class GameController extends InputAdapter
     {
 
     }
+
+    /** True when an on-screen control (touch HUD) sits at this real-pixel point. */
+    public boolean isOverControl(int screenX, int screenY)
+    {
+        return false;
+    }
 }

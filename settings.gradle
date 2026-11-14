@@ -1,1 +1,14 @@
 include 'core', 'client', 'onlinelib-steam', 'desktop', 'steam', 'server'
+
+// The Android client is opt-in: it is only configured when an Android SDK is
+// available (ANDROID_HOME set) or when explicitly requested via -PwithAndroid.
+// This keeps the desktop/server builds working in environments without the
+// Android SDK installed (e.g. CI that only ships the desktop/server artifacts).
+if (System.getenv('ANDROID_HOME') != null ||
+    System.getenv('ANDROID_SDK_ROOT') != null ||
+    gradle.startParameter.projectProperties.containsKey('withAndroid')) {
+    include 'android'
+    // Shaded anthill-runtime (org.apache.http relocated) so the Android client can
+    // go online — Android's stripped bootclasspath org.apache.http otherwise wins.
+    include 'anthill-android'
+}

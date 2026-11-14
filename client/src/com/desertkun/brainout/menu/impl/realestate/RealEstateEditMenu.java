@@ -338,8 +338,9 @@ public class RealEstateEditMenu extends Menu implements EventReceiver
         if (map == null)
             return mousePosition;
 
-        Map.GetMouseScaleWatcher(screenX - BrainOutClient.getWidth() / 2f,
-                - (screenY - BrainOutClient.getHeight() / 2f), mousePosition);
+        // screenX/Y are real pixels; the world camera uses UI units (see BrainOutClient.getUIScale)
+        Map.GetMouseScaleWatcher(BrainOutClient.toUIX(screenX) - BrainOutClient.getWidth() / 2f,
+                - (BrainOutClient.toUIY(screenY) - BrainOutClient.getHeight() / 2f), mousePosition);
 
         mousePosition.x = MathUtils.clamp(mousePosition.x, 0, map.getWidth());
         mousePosition.y = MathUtils.clamp(mousePosition.y, 0, map.getHeight());

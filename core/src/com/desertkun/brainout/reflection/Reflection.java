@@ -26,13 +26,23 @@ public class Reflection
         this.classNames = new ObjectMap<>();
     }
 
+    /**
+     * Source of classes to scan for reflection annotations. The default scans the
+     * JVM class path (works on desktop/server where compiled {@code .class} files
+     * are reachable). Android has no such class path — its code lives in a DEX —
+     * so it overrides this to scan a bundled jar of {@code .class} files instead.
+     */
+    protected Builder scan() throws IOException
+    {
+        return AnnotationDetector.scanClassPath();
+    }
+
     @SuppressWarnings("unchecked")
     public boolean init()
     {
         try
         {
-            AnnotationDetector.
-                scanClassPath().
+            scan().
                 filter(new FilenameFilter()
                 {
                     @Override
@@ -59,8 +69,7 @@ public class Reflection
 
         try
         {
-            AnnotationDetector.
-                scanClassPath().
+            scan().
                 filter(new FilenameFilter()
                 {
                     @Override

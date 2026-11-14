@@ -1,0 +1,10 @@
+# Keep the build context (and image) lean: only the jar, configs, *.shuffle and
+# packages/ are COPYed by the Dockerfile.
+*.bat
+*.sh
+*.log
+Dockerfile
+.dockerignore
+docker-compose.yml
+DEPLOY.md
+brainout-server-o.jar

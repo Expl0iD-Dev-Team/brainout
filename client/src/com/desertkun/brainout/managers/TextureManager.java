@@ -50,6 +50,17 @@ public class TextureManager
         BrainOutClient.Skin.addRegions(txt);
     }
 
+    /** Registers an atlas built at runtime (not loaded through an AssetManager). */
+    public void registerAtlas(String atlasName, TextureAtlas atlas)
+    {
+        if (!dataNames.contains(atlasName, false))
+            dataNames.add(atlasName);
+
+        data.put(atlasName, atlas);
+
+        BrainOutClient.Skin.addRegions(atlas);
+    }
+
     public void cleanupAtlas(String atlasName)
     {
         TextureAtlas txt = data.removeKey(atlasName);

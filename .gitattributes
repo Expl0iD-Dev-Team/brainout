@@ -1,2 +1,9 @@
 rt.jar filter=lfs diff=lfs merge=lfs -text
 bin/obfuscated/brainout-desktop.jar filter=lfs diff=lfs merge=lfs -text
+
+# Shell scripts and Docker build files must keep LF endings to run on Linux.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.dockerignore text eol=lf
+bin/server/docker-compose.yml text eol=lf
+

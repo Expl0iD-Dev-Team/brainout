@@ -187,7 +187,9 @@ public class RemoteClient
         if (info == null)
             return def;
 
-        return info.optFloat(key, def);
+        // Android's built-in org.json (which wins over the bundled one) has no
+        // optFloat / put(String, float); go through double instead.
+        return (float) info.optDouble(key, def);
     }
 
     public int getInfoInt(String key, int def)
@@ -219,7 +221,9 @@ public class RemoteClient
         if (this.info == null)
             return;
 
-        this.info.put(key, v);
+        // put(String, float) doesn't exist on Android and crashed the game the
+        // moment a player took damage online
+        this.info.put(key, (double) v);
     }
 
     public void setInfoInt(String key, int v)

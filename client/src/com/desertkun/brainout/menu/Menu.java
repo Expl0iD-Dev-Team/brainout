@@ -70,7 +70,7 @@ public abstract class Menu extends Stage
 
     public Menu()
     {
-        super(new ScalingViewport(Scaling.stretch, Gdx.graphics.getWidth(), Gdx.graphics.getHeight(), new OrthographicCamera()),
+        super(new ScalingViewport(Scaling.stretch, BrainOutClient.getWidth(), BrainOutClient.getHeight(), new OrthographicCamera()),
             BrainOutClient.ClientSett.allocateNewBatch());
 
         gs = null;
@@ -306,7 +306,9 @@ public abstract class Menu extends Stage
         ((OrthographicCamera) getCamera()).setToOrtho(false, BrainOutClient.getWidth(), BrainOutClient.getHeight());
         getCamera().update();
 
-        getViewport().setScreenSize(BrainOutClient.getWidth(), BrainOutClient.getHeight());
+        // The menu is laid out in UI units and stretched over the real screen,
+        // which also maps touches back into UI units (see BrainOutClient.getUIScale).
+        getViewport().setScreenSize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         getViewport().setWorldSize(BrainOutClient.getWidth(), BrainOutClient.getHeight());
 
         if (postEffects != null)
@@ -325,10 +327,23 @@ public abstract class Menu extends Stage
     }
 
     @Override
+    public boolean setKeyboardFocus(com.badlogic.gdx.scenes.scene2d.Actor actor)
+    {
+        if (actor instanceof com.badlogic.gdx.scenes.scene2d.ui.TextField)
+        {
+            BrainOutClient.Env.prepareTextField((com.badlogic.gdx.scenes.scene2d.ui.TextField) actor);
+        }
+
+        return super.setKeyboardFocus(actor);
+    }
+
+    @Override
     public boolean keyDown(int keyCode)
     {
         switch (keyCode)
         {
+            // Android's back button closes menus like Escape does
+            case Input.Keys.BACK:
             case Input.Keys.ESCAPE:
             {
                 if (escape())

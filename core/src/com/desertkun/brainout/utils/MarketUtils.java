@@ -247,7 +247,8 @@ public class MarketUtils
                         continue;
 
                     String param = key.substring(2);
-                    aci.getProtect().put(param, payload.optFloat(key, 0));
+                    // no optFloat in Android's built-in org.json
+                    aci.getProtect().put(param, (float) payload.optDouble(key, 0));
                 }
 
                 i = aci;

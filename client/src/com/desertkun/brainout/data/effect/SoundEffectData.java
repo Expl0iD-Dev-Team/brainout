@@ -107,7 +107,15 @@ public class SoundEffectData extends EffectData implements Runnable
             if (volume > 0)
             {
                 play();
-                updateSound();
+
+                // Sound.play() returns -1 when the platform can't start the sound
+                // (on Android: SoundPool is out of streams or the sample hasn't
+                // loaded yet). Recursing until it succeeds overflowed the stack and
+                // killed the game in the lobby; just try again next update.
+                if (isPlaying())
+                {
+                    updateSound();
+                }
             }
         }
     }

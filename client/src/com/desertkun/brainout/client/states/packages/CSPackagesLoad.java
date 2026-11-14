@@ -2,6 +2,7 @@ package com.desertkun.brainout.client.states.packages;
 
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.utils.Array;
+import com.esotericsoftware.minlog.Log;
 import com.desertkun.brainout.BrainOut;
 import com.desertkun.brainout.BrainOutClient;
 import com.desertkun.brainout.ClientConstants;
@@ -15,6 +16,7 @@ public class CSPackagesLoad extends ControllerState implements Runnable
 {
     private final Array<String> packagesToLoad;
     private final Runnable loaded;
+    private long started;
 
     public CSPackagesLoad(Array<String> packagesToLoad)
     {
@@ -36,6 +38,8 @@ public class CSPackagesLoad extends ControllerState implements Runnable
     @Override
     public void init()
     {
+        started = System.currentTimeMillis();
+
         // unload all packages except mainmenu
         BrainOut.PackageMgr.unloadPackages(false,
             contentPackage -> ClientConstants.Client.MAINMENU_PACKAGE.equals(contentPackage.getName()));
@@ -54,6 +58,9 @@ public class CSPackagesLoad extends ControllerState implements Runnable
 
     private void packagesLoaded()
     {
+        // load time on players' phones shows up in their logs and crash reports
+        Log.info("Packages loaded in " + (System.currentTimeMillis() - started) / 1000 + " s");
+
         if (loaded != null)
         {
             loaded.run();
