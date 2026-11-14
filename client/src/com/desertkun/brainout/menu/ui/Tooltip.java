@@ -31,6 +31,16 @@ public class Tooltip extends InputListener
     private TimerTask timer;
     private TooltipCreator creator;
 
+    // Touch screens have no hover: there a finger held still on the actor for
+    // LONG_PRESS seconds shows the tooltip until it is lifted, and that touch
+    // is then no longer a tap (the item is not moved or used).
+    private static final float LONG_PRESS = 0.45f;
+    private static final float LONG_PRESS_SLOP = 12f; // UI units the finger may wander
+    private TimerTask longPress;
+    private boolean longPressShown;
+    private int pressPointer = -1;
+    private float pressX, pressY;
+
     private static Tooltip Last = null;
 
     public interface TooltipCreator
@@ -252,13 +262,113 @@ public class Tooltip extends InputListener
         super.exit(event, x, y, pointer, toActor);
     }
 
+    private static boolean isTouchScreen()
+    {
+        return Gdx.app.getType() == com.badlogic.gdx.Application.ApplicationType.Android
+            || Gdx.app.getType() == com.badlogic.gdx.Application.ApplicationType.iOS;
+    }
+
     @Override
     public boolean touchDown(InputEvent event, float x, float y, int pointer, int button)
     {
         remove();
         hide();
+        cancelLongPress();
+
+        if (isTouchScreen() && pressPointer == -1)
+        {
+            pressPointer = pointer;
+            pressX = event.getStageX();
+            pressY = event.getStageY();
+
+            final Stage touchStage = event.getStage();
+
+            longPress = new TimerTask()
+            {
+                @Override
+                public void run()
+                {
+                    Gdx.app.postRunnable(() -> showForLongPress(touchStage));
+                }
+            };
+
+            BrainOutClient.Timer.schedule(longPress, (long)(1000 * LONG_PRESS));
+
+            // keep receiving this pointer's drag and up events
+            return true;
+        }
 
         return super.touchDown(event, x, y, pointer, button);
+    }
+
+    @Override
+    public void touchDragged(InputEvent event, float x, float y, int pointer)
+    {
+        if (pointer == pressPointer && !longPressShown &&
+            Math.abs(event.getStageX() - pressX) + Math.abs(event.getStageY() - pressY) > LONG_PRESS_SLOP)
+        {
+            // a drag (moving an item, scrolling a list), not a long press
+            cancelLongPress();
+        }
+
+        super.touchDragged(event, x, y, pointer);
+    }
+
+    @Override
+    public void touchUp(InputEvent event, float x, float y, int pointer, int button)
+    {
+        if (pointer == pressPointer)
+        {
+            cancelLongPress();
+
+            if (longPressShown)
+            {
+                longPressShown = false;
+                remove();
+            }
+
+            pressPointer = -1;
+        }
+
+        super.touchUp(event, x, y, pointer, button);
+    }
+
+    private void showForLongPress(Stage touchStage)
+    {
+        if (longPress == null || pressPointer == -1)
+            return;
+
+        longPress = null;
+
+        try
+        {
+            tooltipActor = creator.get();
+            if (stage == null || tooltipActor == null)
+                return;
+            stage.addActor(tooltipActor);
+            Last = this;
+            longPressShown = true;
+        }
+        catch (GdxRuntimeException ignored)
+        {
+            return;
+        }
+
+        // the finger is held to read, not to tap: take the touch away from the
+        // click and drag listeners so lifting it does nothing else
+        if (touchStage != null)
+        {
+            touchStage.cancelTouchFocusExcept(this, actor);
+        }
+    }
+
+    private void cancelLongPress()
+    {
+        if (longPress != null)
+        {
+            longPress.cancel();
+            longPress = null;
+        }
     }
 
     private void show()

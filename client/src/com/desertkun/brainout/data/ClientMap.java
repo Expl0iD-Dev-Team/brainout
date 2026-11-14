@@ -1,5 +1,10 @@
 package com.desertkun.brainout.data;
 
+import com.badlogic.gdx.utils.GdxRuntimeException;
+import com.badlogic.gdx.graphics.g2d.TextureAtlas;
+import com.badlogic.gdx.graphics.g2d.PixmapPacker;
+import com.badlogic.gdx.graphics.Texture;
+import com.badlogic.gdx.graphics.Pixmap;
 import box2dLight.RayHandler;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.assets.AssetManager;
@@ -9,7 +14,6 @@ import com.badlogic.gdx.math.MathUtils;
 import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.math.Vector2;
 import com.badlogic.gdx.physics.box2d.Box2DDebugRenderer;
-import com.badlogic.gdx.tools.texturepacker.TexturePacker;
 import com.badlogic.gdx.utils.*;
 import com.desertkun.brainout.BrainOut;
 import com.desertkun.brainout.BrainOutClient;
@@ -43,8 +47,6 @@ import com.desertkun.brainout.events.DestroyEvent;
 import com.desertkun.brainout.utils.TimeMeasure;
 import com.esotericsoftware.minlog.Log;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -560,67 +562,66 @@ public class ClientMap extends Map
     {
         super.updateExtensions();
 
-        TexturePacker texturePacker = null;
+        // Pictures a map carries with it (custom sprites) are packed into one
+        // atlas named "extensions". This used to go through AWT (ImageIO,
+        // BufferedImage) and the gdx-tools TexturePacker, which Android does
+        // not have: maps with pictures, the Quick Play ones among them, threw
+        // NoClassDefFoundError and the phone stayed on "Initializing map...".
+        // PixmapPacker is in libGDX core and works on every platform. Region
+        // names are the same as before: the extension's key, e.g. "sign.png".
+        PixmapPacker packer = null;
 
         for (ObjectMap.Entry<String, byte[]> entry : getExtensions())
         {
-            if (entry.key.endsWith(".png"))
-            {
-                byte[] imageData = entry.value;
-                try
-                {
-                    BufferedImage image = ImageIO.read(new ByteArrayInputStream(imageData));
+            if (!entry.key.endsWith(".png"))
+                continue;
 
-                    if (texturePacker == null)
-                    {
-                        TexturePacker.Settings texturePackerSettings = new TexturePacker.Settings();
-
-                        texturePackerSettings.maxWidth = 2048;
-                        texturePackerSettings.maxHeight = 2048;
-                        texturePackerSettings.fast = true;
-
-                        texturePacker = new TexturePacker(texturePackerSettings);
-                    }
-
-                    texturePacker.addImage(image, entry.key);
-                }
-                catch (IOException e)
-                {
-                    e.printStackTrace();
-                    if (Log.ERROR) Log.error("Failed to load image: " + entry.key);
-                }
-            }
-        }
-
-        if (texturePacker != null)
-        {
-            Path dir;
+            byte[] imageData = entry.value;
+            Pixmap pixmap;
 
             try
             {
-                dir = Files.createTempDirectory("brainout-texture-pack");
+                pixmap = new Pixmap(imageData, 0, imageData.length);
             }
-            catch (IOException e)
+            catch (GdxRuntimeException e)
             {
                 e.printStackTrace();
-                return;
+                if (Log.ERROR) Log.error("Failed to load image: " + entry.key);
+                continue;
             }
 
-            texturePacker.pack(dir.toFile(), "extensions");
-            Path atlas = dir.resolve("extensions.atlas");
-            String atlasPath = Gdx.files.absolute(atlas.toString()).path();
-            AssetManager m = BrainOutClient.PackageMgr.getFirstAssetManager();
+            if (packer == null)
+            {
+                packer = new PixmapPacker(2048, 2048, Pixmap.Format.RGBA8888, 2, false);
+            }
 
-            if (BrainOutClient.TextureMgr.getAtlas("extensions") != null)
+            try
+            {
+                packer.pack(entry.key, pixmap);
+            }
+            catch (GdxRuntimeException e)
+            {
+                // larger than a page
+                if (Log.ERROR) Log.error("Failed to pack image " + entry.key + ": " + e.getMessage());
+            }
+
+            pixmap.dispose();
+        }
+
+        if (packer != null)
+        {
+            TextureAtlas atlas = packer.generateTextureAtlas(
+                Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest, false);
+            packer.dispose();
+
+            TextureAtlas previous = BrainOutClient.TextureMgr.getAtlas("extensions");
+            if (previous != null)
             {
                 BrainOutClient.TextureMgr.cleanupAtlas("extensions");
+                previous.dispose();
             }
 
-            BrainOutClient.TextureMgr.loadAtlas(atlasPath, m);
-            m.finishLoadingAsset(atlasPath);
-
-            BrainOutClient.TextureMgr.registerAtlas("extensions", atlasPath, m);
-
+            BrainOutClient.TextureMgr.registerAtlas("extensions", atlas);
         }
     }
 }

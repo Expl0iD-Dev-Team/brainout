@@ -3,15 +3,20 @@ package com.desertkun.brainout;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.Input;
 import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
 import com.badlogic.gdx.scenes.scene2d.Actor;
+import com.badlogic.gdx.scenes.scene2d.Group;
 import com.badlogic.gdx.scenes.scene2d.InputEvent;
+import com.badlogic.gdx.scenes.scene2d.InputListener;
 import com.badlogic.gdx.scenes.scene2d.Stage;
 import com.badlogic.gdx.scenes.scene2d.Touchable;
+import com.badlogic.gdx.scenes.scene2d.ui.Button;
 import com.badlogic.gdx.scenes.scene2d.ui.Image;
 import com.badlogic.gdx.scenes.scene2d.ui.Table;
 import com.badlogic.gdx.scenes.scene2d.ui.TextButton;
 import com.badlogic.gdx.scenes.scene2d.utils.ClickListener;
-import com.badlogic.gdx.utils.Align;
+import com.badlogic.gdx.scenes.scene2d.utils.TextureRegionDrawable;
+import com.badlogic.gdx.utils.Scaling;
 import com.badlogic.gdx.utils.viewport.ScreenViewport;
 import com.desertkun.brainout.controllers.GameController;
 import com.desertkun.brainout.events.GameControllerEvent;
@@ -25,10 +30,15 @@ import com.desertkun.brainout.events.SelectSlotEvent;
  * half of the screen drives the move stick, a touch in the right half drives the
  * aim stick (which also auto-fires past a threshold). Buttons live on a
  * {@link Stage} and get first refusal on every touch, so move, aim+fire and a
- * button can all be held at once:
+ * button can all be held at once.
  *
- *   bottom right  weapon slots 1-4 + last, weapon / reload / crouch / use
- *   top left      menu (pause), players, chat, zoom, more
+ * The buttons are small round translucent icons (touch-round + touch-icon-*,
+ * drawn by scripts/make-touch-icons.py), gathered around the right thumb so
+ * the middle of the screen stays free (see layoutHud):
+ *
+ *   bottom right  big fire button; reload, use and crouch around it; weapon
+ *                 switch further left; slots 1-4 + last in a row above
+ *   top left      menu (pause), players / inventory, chat, zoom, more
  *   "more"        drop weapon, drop ammo, unload, fire mode, change team
  *
  * The Android back button opens the pause menu in a match, like Escape on a
@@ -44,8 +54,12 @@ public class AndroidGameController extends GameController
 
     private Stage ui;
     private Image moveBase, moveKnob, aimBase, aimKnob;
-    private Table cluster, utility, morePanel;
-    private TextButton playersButton;
+    private Group cluster, utility;
+    private Table morePanel;
+    private Button fire, reload, use, crouch, weapon;
+    private Button menu, players, chat, zoom, more;
+    private final Button[] slots = new Button[5];
+    private Image playersIcon;
     private boolean inventoryMode;
 
     private int movePointer = NONE;
@@ -100,6 +114,9 @@ public class AndroidGameController extends GameController
 
         ui.addActor(cluster);
         ui.addActor(utility);
+        ui.addActor(morePanel);
+
+        layoutHud();
     }
 
     private Image skinImage(String drawable)
@@ -109,142 +126,17 @@ public class AndroidGameController extends GameController
         return img;
     }
 
-    private Table buildCluster()
+    private Group buildCluster()
     {
-        Table table = new Table();
-        table.setFillParent(true);
-        table.align(Align.bottomRight);
-
-        float gap = minDim() * AndroidConstants.Touch.BUTTON_PAD;
-        float w = minDim() * AndroidConstants.Touch.BUTTON_W;
-        float h = minDim() * AndroidConstants.Touch.BUTTON_H;
-        float slot = minDim() * AndroidConstants.Touch.SLOT_SIZE;
-
-        // Direct weapon slots, as 1-4 and Q on a keyboard (KeyboardController).
-        Table slots = new Table();
-        slots.add(button("1", false, () -> sendEvent(SelectSlotEvent.obtain(0, Constants.Properties.SLOT_PRIMARY))))
-            .size(slot).pad(gap);
-        slots.add(button("2", false, () -> sendEvent(SelectSlotEvent.obtain(1)))).size(slot).pad(gap);
-        slots.add(button("3", false, () ->
-        {
-            if (!sendEvent(SelectSlotEvent.obtain(2)))
-            {
-                sendEvent(SelectSlotEvent.obtain(0, Constants.Properties.SLOT_SECONDARY));
-            }
-        })).size(slot).pad(gap);
-        slots.add(button("4", false, () -> sendEvent(SelectSlotEvent.obtain(3)))).size(slot).pad(gap);
-        slots.add(button(L.get("MENU_TOUCH_LAST_SLOT"), true, () -> sendEvent(SelectPreviousSlotEvent.obtain())))
-            .size(slot * 1.6f, slot).pad(gap);
-
-        table.add(slots).right().row();
-
-        Table grid = new Table();
-        grid.add(button(L.get("MENU_TOUCH_WEAPON"), false,
-            () -> action(GameControllerEvent.Action.switchWeapon))).size(w, h).pad(gap);
-        grid.add(button(L.get("MENU_TOUCH_RELOAD"), false,
-            () -> action(GameControllerEvent.Action.reload))).size(w, h).pad(gap);
-        grid.row();
-        grid.add(button(L.get("MENU_TOUCH_CROUCH"), false, () ->
-        {
-            crouching = !crouching;
-            action(crouching ? GameControllerEvent.Action.beginSit : GameControllerEvent.Action.endSit);
-        })).size(w, h).pad(gap);
-        grid.add(button(L.get("MENU_TOUCH_USE"), false, this::use)).size(w, h).pad(gap);
+        Group group = new Group();
+        // only the buttons take touches, the rest of the screen stays the sticks'
+        group.setTouchable(Touchable.childrenOnly);
 
         // Hold to fire where the weapon points. The aim stick also fires once
         // pulled past FIRE_THRESHOLD, but players tap expecting a shot, and the
         // button lets the right thumb shoot while it is not aiming.
-        Table bottom = new Table();
-        bottom.add(fireButton()).size(w, h * 2 + gap * 2).pad(gap);
-        bottom.add(grid);
-
-        table.add(bottom).right();
-
-        // Float the cluster above the bottom HUD strip and in from the edge.
-        table.padRight(realWidth() * AndroidConstants.Touch.BUTTON_MARGIN_RIGHT);
-        table.padBottom(realHeight() * AndroidConstants.Touch.BUTTON_MARGIN_BOTTOM);
-
-        return table;
-    }
-
-    private Table buildUtility()
-    {
-        Table table = new Table();
-        table.setFillParent(true);
-        table.align(Align.topLeft);
-
-        float gap = minDim() * AndroidConstants.Touch.BUTTON_PAD;
-        float w = minDim() * AndroidConstants.Touch.SMALL_BUTTON_W;
-        float h = minDim() * AndroidConstants.Touch.SMALL_BUTTON_H;
-        float margin = minDim() * AndroidConstants.Touch.UTILITY_MARGIN;
-
-        Table row = new Table();
-        // the pause menu, the same thing Escape / Back opens
-        row.add(button(L.get("MENU_TOUCH_MENU"), true, () -> action(GameControllerEvent.Action.back)))
-            .size(w, h).pad(gap);
-        // In Free Play the same action opens the inventory with the loot around
-        // the player (Tab on a keyboard); the label follows (updateModeLabels).
-        playersButton = button(L.get("MENU_TOUCH_PLAYERS"), true,
-            () -> action(GameControllerEvent.Action.openPlayerList));
-        row.add(playersButton).size(w, h).pad(gap);
-        // delayed like the keyboard's chat key, so the menu opens on a clean frame
-        row.add(button(L.get("MENU_TOUCH_CHAT"), true,
-            () -> sendDelayedEvent(GameControllerEvent.obtain(GameControllerEvent.Action.openChat))))
-            .size(w, h).pad(gap);
-        row.add(button(L.get("MENU_TOUCH_ZOOM"), true, () -> action(GameControllerEvent.Action.switchZoom)))
-            .size(w, h).pad(gap);
-        row.add(button(L.get("MENU_TOUCH_MORE"), true, () -> morePanel.setVisible(!morePanel.isVisible())))
-            .size(w, h).pad(gap);
-
-        morePanel = new Table();
-        morePanel.setVisible(false);
-        addMore(morePanel, "MENU_TOUCH_DROP", GameControllerEvent.Action.dropInstrument, w, h, gap);
-        addMore(morePanel, "MENU_TOUCH_DROP_AMMO", GameControllerEvent.Action.dropAmmo, w, h, gap);
-        addMore(morePanel, "MENU_TOUCH_UNLOAD", GameControllerEvent.Action.unload, w, h, gap);
-        addMore(morePanel, "MENU_TOUCH_FIRE_MODE", GameControllerEvent.Action.switchShootMode, w, h, gap);
-        addMore(morePanel, "MENU_TOUCH_TEAM", GameControllerEvent.Action.changeTeam, w, h, gap);
-
-        table.add(row).left().row();
-        table.add(morePanel).left().padLeft(w * 4 + gap * 8);
-
-        table.padTop(margin);
-        table.padLeft(margin);
-
-        return table;
-    }
-
-    private void addMore(Table panel, String label, GameControllerEvent.Action action, float w, float h, float gap)
-    {
-        panel.add(button(L.get(label), true, () ->
-        {
-            morePanel.setVisible(false);
-            action(action);
-        })).size(w * 1.3f, h).pad(gap).row();
-    }
-
-    private TextButton button(String text, boolean small, Runnable onTap)
-    {
-        TextButton button = new TextButton(text, BrainOutClient.Skin, "button-small");
-        button.getLabel().setFontScale(small
-            ? AndroidConstants.Touch.SMALL_FONT_SCALE
-            : AndroidConstants.Touch.BUTTON_FONT_SCALE);
-        button.getLabel().setWrap(true);
-        button.addListener(new ClickListener()
-        {
-            @Override
-            public void clicked(InputEvent event, float x, float y)
-            {
-                onTap.run();
-            }
-        });
-        return button;
-    }
-
-    private TextButton fireButton()
-    {
-        TextButton button = new TextButton(L.get("MENU_TOUCH_FIRE"), BrainOutClient.Skin, "button-small");
-        button.getLabel().setFontScale(AndroidConstants.Touch.BUTTON_FONT_SCALE);
-        button.addListener(new com.badlogic.gdx.scenes.scene2d.InputListener()
+        fire = iconButton("fire", "MENU_TOUCH_FIRE", null);
+        fire.addListener(new InputListener()
         {
             @Override
             public boolean touchDown(InputEvent event, float x, float y, int pointer, int b)
@@ -258,6 +150,244 @@ public class AndroidGameController extends GameController
             public void touchUp(InputEvent event, float x, float y, int pointer, int b)
             {
                 releaseFireButton();
+            }
+        });
+
+        reload = iconButton("reload", "MENU_TOUCH_RELOAD", () -> action(GameControllerEvent.Action.reload));
+        use = iconButton("use", "MENU_TOUCH_USE", this::use);
+        crouch = iconButton("crouch", "MENU_TOUCH_CROUCH", () ->
+        {
+            crouching = !crouching;
+            crouch.setChecked(crouching);
+            action(crouching ? GameControllerEvent.Action.beginSit : GameControllerEvent.Action.endSit);
+        });
+        weapon = iconButton("weapon", "MENU_TOUCH_WEAPON", () -> action(GameControllerEvent.Action.switchWeapon));
+
+        // Direct weapon slots, as 1-4 and Q on a keyboard (KeyboardController).
+        slots[0] = textButton("1", () -> sendEvent(SelectSlotEvent.obtain(0, Constants.Properties.SLOT_PRIMARY)));
+        slots[1] = textButton("2", () -> sendEvent(SelectSlotEvent.obtain(1)));
+        slots[2] = textButton("3", () ->
+        {
+            if (!sendEvent(SelectSlotEvent.obtain(2)))
+            {
+                sendEvent(SelectSlotEvent.obtain(0, Constants.Properties.SLOT_SECONDARY));
+            }
+        });
+        slots[3] = textButton("4", () -> sendEvent(SelectSlotEvent.obtain(3)));
+        slots[4] = iconButton("last", "MENU_TOUCH_LAST_SLOT", () -> sendEvent(SelectPreviousSlotEvent.obtain()));
+
+        for (Button b : new Button[]{ fire, reload, use, crouch, weapon })
+            group.addActor(b);
+        for (Button b : slots)
+            group.addActor(b);
+
+        return group;
+    }
+
+    private Group buildUtility()
+    {
+        Group group = new Group();
+        group.setTouchable(Touchable.childrenOnly);
+
+        // the pause menu, the same thing Escape / Back opens
+        menu = iconButton("menu", "MENU_TOUCH_MENU", () -> action(GameControllerEvent.Action.back));
+        // In Free Play the same action opens the inventory with the loot around
+        // the player (Tab on a keyboard); the icon follows (updateModeLabels).
+        players = iconButton("players", "MENU_TOUCH_PLAYERS", () -> action(GameControllerEvent.Action.openPlayerList));
+        playersIcon = players.findActor("icon");
+        // delayed like the keyboard's chat key, so the menu opens on a clean frame
+        chat = iconButton("chat", "MENU_TOUCH_CHAT",
+            () -> sendDelayedEvent(GameControllerEvent.obtain(GameControllerEvent.Action.openChat)));
+        zoom = iconButton("zoom", "MENU_TOUCH_ZOOM", () -> action(GameControllerEvent.Action.switchZoom));
+        more = iconButton("more", "MENU_TOUCH_MORE", () -> morePanel.setVisible(!morePanel.isVisible()));
+
+        for (Button b : new Button[]{ menu, players, chat, zoom, more })
+            group.addActor(b);
+
+        // the rarely used actions, as words: there is room, and icons for
+        // "drop ammo" or "unload" would only be guessed at
+        morePanel = new Table();
+        morePanel.setVisible(false);
+        addMore(morePanel, "MENU_TOUCH_DROP", GameControllerEvent.Action.dropInstrument);
+        addMore(morePanel, "MENU_TOUCH_DROP_AMMO", GameControllerEvent.Action.dropAmmo);
+        addMore(morePanel, "MENU_TOUCH_UNLOAD", GameControllerEvent.Action.unload);
+        addMore(morePanel, "MENU_TOUCH_FIRE_MODE", GameControllerEvent.Action.switchShootMode);
+        addMore(morePanel, "MENU_TOUCH_TEAM", GameControllerEvent.Action.changeTeam);
+
+        return group;
+    }
+
+    /**
+     * Places every button for the current screen size. Sizes are fractions of
+     * the short side (AndroidConstants.Touch); positions are button centres in
+     * stage pixels, y up from the bottom.
+     */
+    private void layoutHud()
+    {
+        float w = realWidth(), h = realHeight(), r = minDim();
+
+        float big = r * AndroidConstants.Touch.FIRE_SIZE;
+        float mid = r * AndroidConstants.Touch.ACTION_SIZE;
+        float small = r * AndroidConstants.Touch.UTILITY_SIZE;
+        float slot = r * AndroidConstants.Touch.SLOT_SIZE;
+        float gap = r * AndroidConstants.Touch.BUTTON_GAP;
+        float margin = r * AndroidConstants.Touch.EDGE_MARGIN;
+
+        // the fire button sits in the corner, above the weapon / health panel
+        float fx = w - margin - big / 2f;
+        float fy = h * AndroidConstants.Touch.CLUSTER_BOTTOM + big / 2f;
+        place(fire, fx, fy, big);
+
+        // reload, use and crouch on an arc around it: left, up-left, up
+        float around = big / 2f + gap + mid / 2f;
+        placeAround(reload, fx, fy, around, 180, mid);
+        placeAround(use, fx, fy, around, 135, mid);
+        placeAround(crouch, fx, fy, around, 90, mid);
+        place(weapon, fx - around - mid - gap, fy, mid);
+
+        // slots in a row above, right-aligned, "last" outermost
+        float sy = fy + around + mid / 2f + gap + slot / 2f;
+        for (int i = 0; i < slots.length; i++)
+        {
+            place(slots[i], w - margin - slot / 2f - (slots.length - 1 - i) * (slot + gap), sy, slot);
+        }
+
+        // the utility row along the top-left edge
+        Button[] row = { menu, players, chat, zoom, more };
+        float uy = h - margin - small / 2f;
+        for (int i = 0; i < row.length; i++)
+        {
+            place(row[i], margin + small / 2f + i * (small + gap), uy, small);
+        }
+
+        // the "more" list drops down from its button
+        float bw = small * AndroidConstants.Touch.MORE_WIDTH;
+        float bh = small * 0.62f;
+        for (com.badlogic.gdx.scenes.scene2d.ui.Cell<?> cell : morePanel.getCells())
+        {
+            cell.size(bw, bh).pad(gap / 3f);
+        }
+        morePanel.invalidate();
+        morePanel.pack();
+        morePanel.setPosition(more.getX(), more.getY() - gap - morePanel.getHeight());
+    }
+
+    private static void place(Actor actor, float cx, float cy, float size)
+    {
+        actor.setSize(size, size);
+        actor.setPosition(cx - size / 2f, cy - size / 2f);
+    }
+
+    private static void placeAround(Actor actor, float cx, float cy, float distance, float degrees, float size)
+    {
+        double a = Math.toRadians(degrees);
+        place(actor, cx + (float) Math.cos(a) * distance, cy + (float) Math.sin(a) * distance, size);
+    }
+
+    private void addMore(Table panel, String label, GameControllerEvent.Action action)
+    {
+        TextButton button = new TextButton(L.get(label), BrainOutClient.Skin, "button-small");
+        button.getLabel().setFontScale(AndroidConstants.Touch.SMALL_FONT_SCALE);
+        button.getLabel().setWrap(true);
+        button.getColor().a = AndroidConstants.Touch.MORE_ALPHA;
+        button.addListener(new ClickListener()
+        {
+            @Override
+            public void clicked(InputEvent event, float x, float y)
+            {
+                morePanel.setVisible(false);
+                action(action);
+            }
+        });
+        panel.add(button).row();
+    }
+
+    private static Button.ButtonStyle roundStyle()
+    {
+        Button.ButtonStyle style = new Button.ButtonStyle();
+        style.up = BrainOutClient.Skin.getDrawable("touch-round");
+        style.down = BrainOutClient.Skin.getDrawable("touch-round-down");
+        style.checked = style.down;
+        return style;
+    }
+
+    private static boolean hasIcons()
+    {
+        return BrainOutClient.getRegion("touch-round") != null;
+    }
+
+    /**
+     * A round button with a pictogram. Packages built before the icons existed
+     * have no touch-* regions; then it is a text button as before.
+     */
+    private Button iconButton(String icon, String fallbackLabel, Runnable onTap)
+    {
+        TextureRegion region = BrainOutClient.getRegion("touch-icon-" + icon);
+
+        Button button;
+
+        if (region != null && hasIcons())
+        {
+            button = new Button(roundStyle());
+            Image image = new Image(new TextureRegionDrawable(region));
+            image.setName("icon");
+            image.setScaling(Scaling.fit);
+            image.setTouchable(Touchable.disabled);
+            // the glyph takes the inner part of the circle
+            button.add(image)
+                .width(com.badlogic.gdx.scenes.scene2d.ui.Value.percentWidth(AndroidConstants.Touch.ICON_SCALE, button))
+                .height(com.badlogic.gdx.scenes.scene2d.ui.Value.percentHeight(AndroidConstants.Touch.ICON_SCALE, button));
+        }
+        else
+        {
+            TextButton text = new TextButton(L.get(fallbackLabel), BrainOutClient.Skin, "button-small");
+            text.getLabel().setFontScale(AndroidConstants.Touch.SMALL_FONT_SCALE);
+            text.getLabel().setWrap(true);
+            button = text;
+        }
+
+        if (onTap != null)
+        {
+            button.addListener(new ClickListener()
+            {
+                @Override
+                public void clicked(InputEvent event, float x, float y)
+                {
+                    onTap.run();
+                }
+            });
+        }
+
+        return button;
+    }
+
+    /** A round button with a number (weapon slots). */
+    private Button textButton(String text, Runnable onTap)
+    {
+        TextButton button;
+
+        if (hasIcons())
+        {
+            TextButton.TextButtonStyle style = new TextButton.TextButtonStyle();
+            Button.ButtonStyle round = roundStyle();
+            style.up = round.up;
+            style.down = round.down;
+            style.font = BrainOutClient.Skin.getFont("medium");
+            style.fontColor = com.badlogic.gdx.graphics.Color.WHITE;
+            button = new TextButton(text, style);
+        }
+        else
+        {
+            button = new TextButton(text, BrainOutClient.Skin, "button-small");
+        }
+
+        button.getLabel().setFontScale(AndroidConstants.Touch.SLOT_FONT_SCALE);
+        button.addListener(new ClickListener()
+        {
+            @Override
+            public void clicked(InputEvent event, float x, float y)
+            {
+                onTap.run();
             }
         });
         return button;
@@ -285,11 +415,21 @@ public class AndroidGameController extends GameController
     private void updateModeLabels()
     {
         boolean inventory = exchangeInsteadOfPlayers();
-        if (inventory == inventoryMode || playersButton == null)
+        if (inventory == inventoryMode || players == null)
             return;
 
         inventoryMode = inventory;
-        playersButton.setText(L.get(inventory ? "MENU_TOUCH_INVENTORY" : "MENU_TOUCH_PLAYERS"));
+
+        if (playersIcon != null)
+        {
+            TextureRegion region = BrainOutClient.getRegion(inventory ? "touch-icon-inventory" : "touch-icon-players");
+            if (region != null)
+                playersIcon.setDrawable(new TextureRegionDrawable(region));
+        }
+        else if (players instanceof TextButton)
+        {
+            ((TextButton) players).setText(L.get(inventory ? "MENU_TOUCH_INVENTORY" : "MENU_TOUCH_PLAYERS"));
+        }
     }
 
     /**
@@ -613,6 +753,7 @@ public class AndroidGameController extends GameController
             ui.getViewport().update(w, h, true);
             lastWidth = w;
             lastHeight = h;
+            layoutHud();
         }
     }
 
@@ -634,10 +775,10 @@ public class AndroidGameController extends GameController
             return;
 
         cluster.setVisible(active);
+        utility.setVisible(active);
 
         if (active)
             updateModeLabels();
-        utility.setVisible(active);
 
         if (!active)
         {
@@ -650,6 +791,9 @@ public class AndroidGameController extends GameController
                 stopFiring();
             }
             releaseFireButton();
+            crouching = false;
+            if (crouch != null)
+                crouch.setChecked(false);
             movePointer = NONE;
             aimPointer = NONE;
             hideStick(moveBase, moveKnob);

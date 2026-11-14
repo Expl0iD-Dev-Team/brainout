@@ -25,26 +25,26 @@ public class AndroidConstants extends ClientConstants
         public static final float FIRE_THRESHOLD = 0.45f;
         public static final float AIM_RADIUS_PX = 600f;
 
-        // --- Action buttons ----------------------------------------------
-        // Button cell size and gap as a fraction of the smaller screen dim.
-        public static final float BUTTON_W = 0.20f;
-        public static final float BUTTON_H = 0.10f;
-        public static final float BUTTON_PAD = 0.014f;
-        public static final float BUTTON_FONT_SCALE = 1.25f;
+        // --- Buttons ------------------------------------------------------
+        // Round icon buttons; sizes are fractions of the smaller screen side
+        // (on a 1080 px tall phone 0.1 is 108 px, about 7 mm).
+        public static final float FIRE_SIZE = 0.17f;      // the fire button, bottom right
+        public static final float ACTION_SIZE = 0.115f;   // reload, use, crouch, weapon
+        public static final float SLOT_SIZE = 0.08f;      // weapon slots 1-4 + last
+        public static final float UTILITY_SIZE = 0.085f;  // menu, players, chat, zoom, more
+        public static final float BUTTON_GAP = 0.014f;
+        public static final float EDGE_MARGIN = 0.025f;
+        // Bottom of the fire button as a fraction of the screen height: above
+        // the weapon / ammo / health panel in the bottom-right corner.
+        public static final float CLUSTER_BOTTOM = 0.17f;
+        // Share of the circle the pictogram takes.
+        public static final float ICON_SCALE = 0.66f;
 
-        // Lift the button cluster off the bottom-right corner so it clears the
-        // in-game HP bar / weapon-and-ammo HUD and the system nav bar.
-        public static final float BUTTON_MARGIN_BOTTOM = 0.16f; // fraction of height
-        public static final float BUTTON_MARGIN_RIGHT = 0.035f; // fraction of width
-
-        // Weapon slot row above the action buttons (square cells).
-        public static final float SLOT_SIZE = 0.095f;
-
-        // Utility row in the top-left corner (menu, players, chat, zoom, more)
-        // and the "more" panel that drops down from it.
-        public static final float SMALL_BUTTON_W = 0.17f;
-        public static final float SMALL_BUTTON_H = 0.085f;
+        public static final float SLOT_FONT_SCALE = 1.2f;
         public static final float SMALL_FONT_SCALE = 1.1f;
-        public static final float UTILITY_MARGIN = 0.02f; // fraction of the smaller dimension
+
+        // The "more" list: button width in utility buttons, and opacity.
+        public static final float MORE_WIDTH = 2.6f;
+        public static final float MORE_ALPHA = 0.85f;
     }
 }
