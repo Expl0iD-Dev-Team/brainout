@@ -163,6 +163,14 @@ public class AndroidGameController extends GameController
         });
         weapon = iconButton("weapon", "MENU_TOUCH_WEAPON", () -> action(GameControllerEvent.Action.switchWeapon));
 
+        // crouch is a toggle: it stays lit while the player sits
+        if (hasIcons())
+        {
+            Button.ButtonStyle toggle = new Button.ButtonStyle(crouch.getStyle());
+            toggle.checked = toggle.down;
+            crouch.setStyle(toggle);
+        }
+
         // Direct weapon slots, as 1-4 and Q on a keyboard (KeyboardController).
         slots[0] = textButton("1", () -> sendEvent(SelectSlotEvent.obtain(0, Constants.Properties.SLOT_PRIMARY)));
         slots[1] = textButton("2", () -> sendEvent(SelectSlotEvent.obtain(1)));
@@ -307,7 +315,8 @@ public class AndroidGameController extends GameController
         Button.ButtonStyle style = new Button.ButtonStyle();
         style.up = BrainOutClient.Skin.getDrawable("touch-round");
         style.down = BrainOutClient.Skin.getDrawable("touch-round-down");
-        style.checked = style.down;
+        // no checked look: a Button flips "checked" on every tap, and only the
+        // crouch toggle should show it (see buildCluster)
         return style;
     }
 
